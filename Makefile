@@ -5,11 +5,12 @@ VFLAGS    := --cc --exe --build -Wall
 BUILD     := build
 
 # Modules that have a unit testbench: tb/<name>_tb.cpp
-MODULES := alu regfile
+MODULES := alu regfile decoder
 
 # RTL files each module needs (packages must come before the files that import them)
 RTL_alu     := rtl/alu_pkg.sv rtl/alu.sv
 RTL_regfile := rtl/regfile.sv
+RTL_decoder := rtl/alu_pkg.sv rtl/decode_pkg.sv rtl/decoder.sv
 
 .PHONY: all test clean $(MODULES)
 
