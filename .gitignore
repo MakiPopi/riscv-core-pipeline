@@ -1,0 +1,8 @@
+obj_dir/
+build/
+*.vcd
+*.fst
+*.o
+*.elf
+*.hex
+__pycache__/
