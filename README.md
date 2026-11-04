@@ -1,16 +1,27 @@
 # riscv-core-pipeline
+
 A parameterizable RISC-V (RV32I) in-order core written in SystemVerilog,
 built as a platform for microarchitecture exploration.
 
 ## Roadmap
+- [x] ALU, register file, instruction decoder, branch comparator, load/store unit
+      (each with a self-checking Verilator testbench)
+- [ ] Single-cycle core + memory model + retirement trace
+- [ ] Co-simulation against Spike (golden ISA model), riscv-tests
 - [ ] 5-stage pipeline with forwarding and hazard detection
-- [ ] Co-simulation against golden ISA model
+- [ ] Performance counters (cycles, instructions, IPC)
 - [ ] Branch prediction (bimodal, gshare, BTB)
 - [ ] Parameterizable L1 I/D caches
 - [ ] M extension, CSRs, exceptions
-- [ ] Performance counters + benchmark analysis (CoreMark, Dhrystone)
+- [ ] Benchmarks (CoreMark, Dhrystone) and design-space analysis
 - [ ] Stretch: superscalar / out-of-order, FPGA synthesis
 
+## Running the unit tests
+Requires Verilator and a C++ compiler.
+
+    make test          # build and run every module testbench
+    make decoder       # run a single module
+
 ## Status
-Work in progress. Rebuilding my earlier 5-stage pipeline from scratch
-with a focus on verification and design-space analysis.
+Work in progress. Datapath modules are complete and tested; the core is next.
+See `docs/design-notes.md` for design decisions and open items.
