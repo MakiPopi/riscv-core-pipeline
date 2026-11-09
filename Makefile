@@ -32,3 +32,10 @@ $(MODULES):
 
 clean:
 > rm -rf $(BUILD)
+
+CORE_RTL := rtl/alu_pkg.sv rtl/decode_pkg.sv rtl/alu.sv rtl/decoder.sv rtl/regfile.sv \
+            rtl/branch_cmp.sv rtl/lsu.sv rtl/core.sv
+
+.PHONY: lint
+lint:
+> $(VERILATOR) --lint-only -Wall --top-module core $(CORE_RTL)
