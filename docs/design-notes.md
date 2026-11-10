@@ -54,7 +54,7 @@ Checks performed so far:
 Not yet independently checked:
 - FENCE encoding, and the other hand-written instruction words in `decoder_tb.cpp`
   (to be cross-checked with the assembler and with Spike).
-- Branches, jumps and loads/stores at the program level (tests still to be written).
+- Jumps and loads/stores at the program level (tests still to be written).
 
 ## Open items
 - Misaligned fetch/branch targets and misaligned loads/stores should trap as real
@@ -63,3 +63,14 @@ Not yet independently checked:
 - FENCE is a no-op (single core, no caches yet).
 - Cleanup: remove `sw/first_loop.mem` and the `run-first` Makefile target once a
   proper test runner replaces them (the assembler builds the same file).
+
+## Program-level test coverage
+| Program | Covers |
+|---|---|
+| `first_loop` | addi, add, bne (backward), lui, sw; exit-by-store; read-and-write of one register |
+| `test_alu` | all OP and OP-IMM instructions with edge values, lui, auipc, x0 behaviour, shift-amount masking |
+| `test_branch` | beq/bne/blt/bge/bltu/bgeu taken and not taken (signed vs. unsigned edge values, swapped operands, x0, same register), far branches of about +4 KiB and -4 KiB, and sentinel registers showing that branches never write a register |
+
+Mutation checks (a fault planted in the RTL must make a program fail at the expected check):
+- ALU arithmetic shift made logical: `test_alu` fails with code 21.
+- Branch comparator `blt` made unsigned: `test_branch` fails with code 15.

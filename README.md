@@ -10,7 +10,8 @@ built as a platform for microarchitecture exploration.
 - [x] Retirement trace (one record per completed instruction)
 - [x] Toolchain flow: assembly -> ELF -> hex, run with `make run`
 - [x] Self-checking assembly test framework (ALU instructions covered)
-- [ ] Self-checking tests for branches, jumps and loads/stores
+- [x] Self-checking test for all six branch types
+- [ ] Self-checking tests for jumps and loads/stores
 - [ ] Co-simulation against Spike (golden ISA model), riscv-tests
 - [ ] 5-stage pipeline with forwarding and hazard detection
 - [ ] Performance counters (cycles, instructions, IPC)
