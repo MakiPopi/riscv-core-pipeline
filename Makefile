@@ -54,3 +54,26 @@ soc:
 
 run-first: soc
 > ./$(SOC_BIN) +hex=sw/first_loop.mem +expect=15
+
+# ---- Building programs from assembly ----
+RVAS := riscv64-unknown-elf-as
+RVLD := riscv64-unknown-elf-ld
+RVOC := riscv64-unknown-elf-objcopy
+RVFLAGS := -march=rv32i -mabi=ilp32
+
+$(BUILD)/prog/%.elf: sw/%.S sw/link.ld
+> @mkdir -p $(BUILD)/prog
+> $(RVAS) $(RVFLAGS) $< -o $(BUILD)/prog/$*.o
+> $(RVLD) -m elf32lriscv -T sw/link.ld -o $@ $(BUILD)/prog/$*.o
+
+$(BUILD)/prog/%.mem: $(BUILD)/prog/%.elf scripts/bin2mem.py
+> $(RVOC) -O binary $< $(BUILD)/prog/$*.bin
+> python3 scripts/bin2mem.py $(BUILD)/prog/$*.bin $@
+
+# Usage: make run PROG=first_loop ARGS=+expect=15
+.PHONY: run
+run: soc $(BUILD)/prog/$(PROG).mem
+> ./$(SOC_BIN) +hex=$(BUILD)/prog/$(PROG).mem $(ARGS)
+
+# Keep intermediate files (.elf, .o, .bin) so we can disassemble them
+.SECONDARY:
