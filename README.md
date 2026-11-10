@@ -11,7 +11,8 @@ built as a platform for microarchitecture exploration.
 - [x] Toolchain flow: assembly -> ELF -> hex, run with `make run`
 - [x] Self-checking assembly test framework (ALU instructions covered)
 - [x] Self-checking test for all six branch types
-- [ ] Self-checking tests for jumps and loads/stores
+- [x] Self-checking test for jal and jalr (links, bit-0 clearing, call/return)
+- [ ] Self-checking test for loads and stores
 - [ ] Co-simulation against Spike (golden ISA model), riscv-tests
 - [ ] 5-stage pipeline with forwarding and hazard detection
 - [ ] Performance counters (cycles, instructions, IPC)
