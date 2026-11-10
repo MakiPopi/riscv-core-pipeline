@@ -6,7 +6,7 @@ built as a platform for microarchitecture exploration.
 ## Roadmap
 - [x] ALU, register file, instruction decoder, branch comparator, load/store unit
       (each with a self-checking Verilator testbench)
-- [ ] Single-cycle core + memory model + retirement trace
+- [x] Single-cycle core + memory model + retirement trace (runs first hand-assembled program)
 - [ ] Co-simulation against Spike (golden ISA model), riscv-tests
 - [ ] 5-stage pipeline with forwarding and hazard detection
 - [ ] Performance counters (cycles, instructions, IPC)

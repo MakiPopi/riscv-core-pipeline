@@ -39,3 +39,18 @@ CORE_RTL := rtl/alu_pkg.sv rtl/decode_pkg.sv rtl/alu.sv rtl/decoder.sv rtl/regfi
 .PHONY: lint
 lint:
 > $(VERILATOR) --lint-only -Wall --top-module core $(CORE_RTL)
+
+SOC_RTL := $(CORE_RTL) rtl/mem.sv rtl/soc_top.sv
+SOC_BIN := $(BUILD)/soc_top/soc_top_tb
+
+.PHONY: soc run-first
+
+soc:
+> @mkdir -p $(BUILD)/soc_top
+> @$(VERILATOR) $(VFLAGS) --top-module soc_top --Mdir $(BUILD)/soc_top -o soc_top_tb \
+>     $(SOC_RTL) tb/soc_top_tb.cpp > $(BUILD)/soc_top/build.log 2>&1 \
+>     || (cat $(BUILD)/soc_top/build.log; exit 1)
+> @grep '%Warning' $(BUILD)/soc_top/build.log || true
+
+run-first: soc
+> ./$(SOC_BIN) +hex=sw/first_loop.mem +expect=15
