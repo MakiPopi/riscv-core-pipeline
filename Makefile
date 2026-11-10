@@ -77,3 +77,17 @@ run: soc $(BUILD)/prog/$(PROG).mem
 
 # Keep intermediate files (.elf, .o, .bin) so we can disassemble them
 .SECONDARY:
+
+# ---- Run every test program: make programs ----
+PROGRAMS := first_loop test_alu
+EXPECT_first_loop := 15
+
+.PHONY: programs
+programs: $(PROGRAMS:%=prog-%)
+
+prog-%: soc $(BUILD)/prog/%.mem
+> @if out=$$(./$(SOC_BIN) +hex=$(BUILD)/prog/$*.mem +notrace +expect=$(or $(EXPECT_$*),0)); then \
+>     echo "PASS  $*"; \
+>   else \
+>     echo "FAIL  $*"; echo "$$out"; exit 1; \
+>   fi
