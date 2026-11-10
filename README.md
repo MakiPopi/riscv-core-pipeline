@@ -12,7 +12,7 @@ built as a platform for microarchitecture exploration.
 - [x] Self-checking assembly test framework (ALU instructions covered)
 - [x] Self-checking test for all six branch types
 - [x] Self-checking test for jal and jalr (links, bit-0 clearing, call/return)
-- [ ] Self-checking test for loads and stores
+- [x] Self-checking test for all loads and stores (every byte offset, sign/zero extension, lane isolation)
 - [ ] Co-simulation against Spike (golden ISA model), riscv-tests
 - [ ] 5-stage pipeline with forwarding and hazard detection
 - [ ] Performance counters (cycles, instructions, IPC)

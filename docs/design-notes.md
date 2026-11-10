@@ -52,9 +52,8 @@ Checks performed so far:
   So the system-level test detects a fault planted below the core.
 
 Not yet independently checked:
-- FENCE encoding, and the other hand-written instruction words in `decoder_tb.cpp`
+- The hand-written instruction words in `decoder_tb.cpp`
   (to be cross-checked with the assembler and with Spike).
-- Loads and stores at the program level (test still to be written).
 
 ## Open items
 - Misaligned fetch/branch targets and misaligned loads/stores should trap as real
@@ -71,9 +70,15 @@ Not yet independently checked:
 | `test_alu` | all OP and OP-IMM instructions with edge values, lui, auipc, x0 behaviour, shift-amount masking |
 | `test_branch` | beq/bne/blt/bge/bltu/bgeu taken and not taken (signed vs. unsigned edge values, swapped operands, x0, same register), far branches of about +4 KiB and -4 KiB, and sentinel registers showing that branches never write a register |
 | `test_jump` | jal forward/backward/far (about 8 KB each way), jal x0, jalr with zero, positive and negative offsets, bit-0 clearing three ways, rd == rs1, link values checked against auipc, call and nested return |
+| `test_mem` | lb/lbu/lh/lhu/lw at every offset (sign bit set, clear and mixed), negative offsets, rd == rs1, loads into x0, sb/sh/sw lane isolation, negative store offsets, sentinels for the rd-field bits of stores, guard words, fence as a no-op (assembler encoding 0ff0000f) |
 
 Mutation checks (a fault planted in the RTL must make a program fail at the expected check):
 - ALU arithmetic shift made logical: `test_alu` fails with code 21.
 - Branch comparator `blt` made unsigned: `test_branch` fails with code 15.
 - `jalr` bit-0 clearing removed from the core: `test_jump` stops with a TRAP on the first odd target.
 - Link value changed from PC+4 to PC: `test_jump` fails with code 2.
+- `sb` byte enable always lane 0: `test_mem` fails with code 43.
+- Halfword select uses `addr_lo[0]` instead of `addr_lo[1]`: `test_mem` fails with code 13.
+
+Not covered at program level: misaligned loads/stores and misaligned jumps. They stop the core
+for now and belong to the exceptions phase.
