@@ -6,7 +6,7 @@
 #include "verilated.h"
 
 // A store to this address ends the simulation. The stored value is the exit code.
-static const uint32_t EXIT_ADDR = 0x10000000u;
+static const uint32_t EXIT_ADDR = 0x20000000u;
 
 static Vsoc_top* dut;
 

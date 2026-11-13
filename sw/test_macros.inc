@@ -13,9 +13,9 @@
 
 # Put this as the last line of the test. Both paths store to the exit address.
 .macro TEST_END
-    lui  x31, 0x10000            # x31 = 0x10000000, the exit address
+    lui  x31, 0x20000            # x31 = 0x20000000, the exit address
     sw   x0, 0(x31)              # success: exit code 0
 test_fail:
-    lui  x31, 0x10000
+    lui  x31, 0x20000
     sw   x29, 0(x31)             # failure: exit code = check number
 .endm

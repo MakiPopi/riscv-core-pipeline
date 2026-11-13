@@ -8,5 +8,5 @@ loop:
     add  x1, x1, x2       # sum += i
     addi x2, x2, -1       # i -= 1
     bne  x2, x0, loop     # repeat while i != 0
-    lui  x5, 0x10000      # x5 = 0x10000000, the exit address
+    lui  x5, 0x20000      # x5 = 0x20000000, the exit address
     sw   x1, 0(x5)        # report the sum (expected: 15)
