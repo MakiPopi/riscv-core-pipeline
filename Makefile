@@ -61,10 +61,10 @@ RVLD := riscv64-unknown-elf-ld
 RVOC := riscv64-unknown-elf-objcopy
 RVFLAGS := -march=rv32i -mabi=ilp32
 
-$(BUILD)/prog/%.elf: sw/%.S sw/link.ld
+$(BUILD)/prog/%.elf: sw/%.S sw/link.ld sw/test_macros.inc
 > @mkdir -p $(BUILD)/prog
 > $(RVAS) $(RVFLAGS) $< -o $(BUILD)/prog/$*.o
-> $(RVLD) -m elf32lriscv -T sw/link.ld -o $@ $(BUILD)/prog/$*.o
+> $(RVLD) --no-warn-rwx-segments -m elf32lriscv -T sw/link.ld -o $@ $(BUILD)/prog/$*.o
 
 $(BUILD)/prog/%.mem: $(BUILD)/prog/%.elf scripts/bin2mem.py
 > $(RVOC) -O binary $< $(BUILD)/prog/$*.bin
@@ -91,3 +91,10 @@ prog-%: soc $(BUILD)/prog/%.mem
 >   else \
 >     echo "FAIL  $*"; echo "$$out"; exit 1; \
 >   fi
+
+# ---- Compare the core's trace with Spike: make cosim ----
+.PHONY: cosim
+cosim: $(PROGRAMS:%=cosim-%)
+
+cosim-%: soc $(BUILD)/prog/%.mem
+> @python3 scripts/cosim.py $*
