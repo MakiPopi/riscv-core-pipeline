@@ -28,7 +28,7 @@
 - **Retirement trace:** `ret_valid`, PC, instruction, destination register and value,
   memory access type/address/data. One record per completed instruction. This is the
   interface for the Spike comparison.
-- **Simulation exit:** a store to 0x10000000 ends the run; the stored value is the
+- **Simulation exit:** a store to 0x20000000 ends the run; the stored value is the
   exit code. The harness detects it from the trace, so the core has no special hardware.
 
 ## Verification approach
@@ -82,3 +82,22 @@ Mutation checks (a fault planted in the RTL must make a program fail at the expe
 
 Not covered at program level: misaligned loads/stores and misaligned jumps. They stop the core
 for now and belong to the exceptions phase.
+
+## Co-simulation with Spike
+scripts/cosim.py runs the core and Spike (--isa=rv32i --log-commits) on the same ELF and
+compares the retirement trace line by line: PC, instruction word, register write and memory
+access. Spike's boot ROM (5 instructions at 0x1000) is skipped; the comparison starts at
+0x80000000. Spike is stopped after as many instructions as the core retired, so the two do not
+need the same exit mechanism.
+
+- Exit address: 0x20000000. Spike has a built-in device at 0x10000000 (giving Spike RAM there
+  fails with an "overlap" error), so the exit address was moved. Spike gets a 4 KiB RAM at
+  0x20000000 so that the exit store is an ordinary store.
+- Spike build: needs the berkeley-softfloat-3 git submodule
+  (git submodule update --init --recursive) before make works. Installed under ~/riscv.
+- Results: first_loop 19, test_alu 154, test_branch 212, test_jump 80, test_mem 249
+  instructions (714 total), all identical.
+- Mutation check: ALU arithmetic shift made logical. The program's own check only notices at the
+  exit store (instruction 76); cosim reports the faulty srai itself (instruction 70, core
+  0x08000000, Spike 0xf8000000).
+- Reference version: Spike 1.1.1-dev (riscv-isa-sim commit 020edce6).
