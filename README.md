@@ -12,7 +12,8 @@ built as a platform for microarchitecture exploration.
 - [x] Self-checking assembly tests for every instruction the decoder supports
       (ALU, branches, jumps, loads/stores)
 - [x] Co-simulation against Spike: every retired instruction of every test program compared
-- [ ] riscv-tests and randomized instruction streams
+- [x] Randomized co-simulation: seeded random programs compared with Spike (`make fuzz`)
+- [ ] riscv-tests
 - [ ] 5-stage pipeline with forwarding and hazard detection
 - [ ] Performance counters (cycles, instructions, IPC)
 - [ ] Branch prediction (bimodal, gshare, BTB)
@@ -25,7 +26,7 @@ built as a platform for microarchitecture exploration.
     rtl/       SystemVerilog sources
     tb/        Verilator C++ testbenches (one per module, plus the SoC harness)
     sw/        test programs (assembly), linker script, shared test macros
-    scripts/   helper scripts (bin2mem.py, cosim.py)
+    scripts/   helper scripts (bin2mem.py, cosim.py, gen_random.py, fuzz.py)
     docs/      design notes
 
 ## Requirements
@@ -39,6 +40,7 @@ in the clone before building).
     make lint                                  # lint the whole core
     make programs                              # run every self-checking program
     make cosim                                 # compare every program with Spike, instruction by instruction
+    make fuzz                                  # random programs, each compared with Spike
     make run PROG=test_alu                     # run one program with a full trace
     make run PROG=first_loop ARGS=+expect=15   # check the exit code
 

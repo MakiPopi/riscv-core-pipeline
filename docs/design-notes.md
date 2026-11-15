@@ -101,3 +101,16 @@ need the same exit mechanism.
   exit store (instruction 76); cosim reports the faulty srai itself (instruction 70, core
   0x08000000, Spike 0xf8000000).
 - Reference version: Spike 1.1.1-dev (riscv-isa-sim commit 020edce6).
+
+## Randomized co-simulation
+scripts/gen_random.py writes a random RV32I program for a given seed; scripts/fuzz.py builds
+each one with the normal Makefile rules and compares it with Spike using cosim.py.
+Generator rules: forward-only branches/jumps (always terminates); x31 is a never-written base
+register pointing at the middle of a 1 KiB scratch area, with aligned offsets (no misaligned or
+out-of-range accesses); x30 is a jump-target temporary; x1..x29 are initialised first (nothing
+depends on Spike's boot code); half of the source registers come from the last four destinations
+(dependency chains); 30% of memory offsets use a 32-byte window (store/load collisions); jalr is
+generated with offsets 0 and 1 (bit-0 clearing); occasional writes to x0; the program ends by
+storing x1..x29 so the final register state is part of the trace.
+Not covered: loops, traps, misaligned accesses, CSRs, instructions outside RV32I.
+Failing programs are kept in build/fuzz/ and can be reproduced from the seed.
