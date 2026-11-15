@@ -114,3 +114,4 @@ generated with offsets 0 and 1 (bit-0 clearing); occasional writes to x0; the pr
 storing x1..x29 so the final register state is part of the trace.
 Not covered: loops, traps, misaligned accesses, CSRs, instructions outside RV32I.
 Failing programs are kept in build/fuzz/ and can be reproduced from the seed.
+- Fuzz run: seeds 1-200 (300 items each), 90843 instructions identical to Spike. Mutation check: sltu compared as signed was caught by 20 of 20 seeds (first mismatch at an sltiu).
