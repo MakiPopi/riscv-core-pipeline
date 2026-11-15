@@ -138,6 +138,7 @@ int main() {
 
   dut->final();
   delete dut;
+  
 
   if (errors) {
     printf("FAILED: %d of %d checks\n", errors, checks);

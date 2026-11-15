@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Generate a random RV32I test program that always terminates.
+
+usage: gen_random.py <seed> [items]  > prog.S
+
+Rules that keep every program valid and comparable with Spike:
+  - Only forward branches and jumps: no loops, so it always ends.
+  - x31 points at the middle of a 1 KiB scratch area and is never written.
+    Every load and store uses x31 as base with an aligned offset, so no access
+    can be misaligned or leave the scratch area.
+  - x30 is a temporary used only to hold jump targets.
+  - x1..x29 are initialised first, so nothing depends on Spike's boot code.
+  - At the end x1..x29 are stored to memory, so the final register state is
+    part of the trace too.
+"""
+import random
+import sys
+
+HALF = 512     # bytes of scratch below and above x31
+EDGE32 = [0, 1, 0xFFFFFFFF, 0x80000000, 0x7FFFFFFF, 0x0000FFFF, 0xFFFF0000, 0x80000001]
+EDGE12 = [0, 1, -1, 2, -2, 2047, -2048]
+
+R_OPS = ["add", "sub", "sll", "slt", "sltu", "xor", "srl", "sra", "or", "and"]
+I_OPS = ["addi", "slti", "sltiu", "xori", "ori", "andi"]
+SH_OPS = ["slli", "srli", "srai"]
+BR_OPS = ["beq", "bne", "blt", "bge", "bltu", "bgeu"]
+LOADS = {"lb": 1, "lbu": 1, "lh": 2, "lhu": 2, "lw": 4}
+STORES = {"sb": 1, "sh": 2, "sw": 4}
+
+
+class Gen:
+    def __init__(self, seed):
+        self.r = random.Random(seed)
+        self.out = []
+        self.recent = []      # most recently written registers
+        self.nlabel = 0
+
+    def emit(self, text):
+        self.out.append("    " + text)
+
+    def val32(self):
+        if self.r.random() < 0.3:
+            return self.r.choice(EDGE32)
+        return self.r.getrandbits(32)
+
+    def imm12(self):
+        if self.r.random() < 0.3:
+            return self.r.choice(EDGE12)
+        return self.r.randint(-2048, 2047)
+
+    def src(self):
+        """A source register: x0..x29, often one written a moment ago."""
+        if self.recent and self.r.random() < 0.5:
+            return self.r.choice(self.recent)
+        return self.r.randrange(0, 30)
+
+    def dest(self):
+        """A destination register: x1..x29, occasionally x0 (the write must vanish)."""
+        if self.r.random() < 0.03:
+            return 0
+        d = self.r.randrange(1, 30)
+        self.recent = ([d] + self.recent)[:4]
+        return d
+
+    def offset(self, size):
+        """An offset from x31 that is a multiple of 'size' and stays inside the scratch area."""
+        lo, hi = -HALF, HALF - size
+        if self.r.random() < 0.3:                 # hot window: many store/load collisions
+            lo, hi = -16, 16 - size
+        return self.r.randint(lo // size, hi // size) * size
+
+    def simple(self):
+        """One straight-line instruction (no control flow)."""
+        kind = self.r.choices(["r", "i", "shift", "lui", "auipc", "load", "store"],
+                              weights=[30, 22, 8, 4, 4, 16, 16])[0]
+        if kind == "r":
+            a, b = self.src(), self.src()
+            return f"{self.r.choice(R_OPS)} x{self.dest()}, x{a}, x{b}"
+        if kind == "i":
+            a = self.src()
+            return f"{self.r.choice(I_OPS)} x{self.dest()}, x{a}, {self.imm12()}"
+        if kind == "shift":
+            a = self.src()
+            sh = self.r.choice([0, 1, 31, self.r.randrange(32)])
+            return f"{self.r.choice(SH_OPS)} x{self.dest()}, x{a}, {sh}"
+        if kind in ("lui", "auipc"):
+            return f"{kind} x{self.dest()}, {self.r.getrandbits(20):#x}"
+        if kind == "load":
+            op = self.r.choice(list(LOADS))
+            return f"{op} x{self.dest()}, {self.offset(LOADS[op])}(x31)"
+        op = self.r.choice(list(STORES))
+        b = self.src()
+        return f"{op} x{b}, {self.offset(STORES[op])}(x31)"
+
+    def label(self):
+        self.nlabel += 1
+        return f"L{self.nlabel}"
+
+    def skipped(self):
+        """1 to 4 instructions that a taken jump or branch skips over."""
+        for _ in range(self.r.randint(1, 4)):
+            self.emit(self.simple())
+
+    def branch(self):
+        lab = self.label()
+        a = self.src()
+        p = self.r.random()
+        b = a if p < 0.15 else (0 if p < 0.30 else self.src())   # equal operands, or x0
+        self.emit(f"{self.r.choice(BR_OPS)} x{a}, x{b}, {lab}")
+        self.skipped()
+        self.out.append(f"{lab}:")
+
+    def jal(self):
+        lab = self.label()
+        self.emit(f"jal x{self.dest()}, {lab}")
+        self.skipped()
+        self.out.append(f"{lab}:")
+
+    def jalr(self):
+        lab = self.label()
+        self.emit(f"la x30, {lab}")
+        # offset 1 makes the sum odd: the core must clear bit 0 and still land on the label
+        self.emit(f"jalr x{self.dest()}, {self.r.choice([0, 1])}(x30)")
+        self.skipped()
+        self.out.append(f"{lab}:")
+
+    def words(self, n):
+        for _ in range(n // 8):
+            self.out.append("    .word " + ", ".join(f"{self.val32():#x}" for _ in range(8)))
+
+    def program(self, seed, items):
+        self.out.append(f"# Random test program, seed {seed} (generated by scripts/gen_random.py)")
+        self.out.append("    .globl _start")
+        self.out.append("_start:")
+        for i in range(1, 30):
+            self.emit(f"li x{i}, {self.val32():#x}")
+        self.emit("la x31, scratch_mid")
+
+        for _ in range(items):
+            kind = self.r.choices(["simple", "branch", "jal", "jalr"],
+                                  weights=[80, 12, 4, 4])[0]
+            if kind == "simple":
+                self.emit(self.simple())
+            else:
+                getattr(self, kind)()
+
+        for i in range(1, 30):                    # dump the final register state
+            self.emit(f"sw x{i}, {HALF + 4 * (i - 1)}(x31)")
+        self.emit("lui x30, 0x20000")             # exit store, code 0
+        self.emit("sw x0, 0(x30)")
+
+        self.out.append("    .data")
+        self.out.append("    .balign 4")
+        self.out.append("scratch_lo:")
+        self.words(128)
+        self.out.append("scratch_mid:")
+        self.words(128)
+        self.out.append("dump:")
+        self.out.append(f"    .space {4 * 29}")
+
+
+def generate(seed, items=300):
+    g = Gen(seed)
+    g.program(seed, items)
+    return "\n".join(g.out) + "\n"
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        sys.exit("usage: gen_random.py <seed> [items]")
+    sys.stdout.write(generate(int(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 300))

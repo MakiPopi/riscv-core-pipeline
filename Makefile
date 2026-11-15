@@ -98,3 +98,18 @@ cosim: $(PROGRAMS:%=cosim-%)
 
 cosim-%: soc $(BUILD)/prog/%.mem
 > @python3 scripts/cosim.py $*
+
+# ---- Random programs: make fuzz [FUZZ_FIRST=1 FUZZ_COUNT=200 FUZZ_ITEMS=300] ----
+FUZZ_FIRST ?= 1
+FUZZ_COUNT ?= 200
+FUZZ_ITEMS ?= 300
+
+# Generated programs live in build/fuzz/ (see scripts/fuzz.py)
+$(BUILD)/prog/fuzz_%.elf: $(BUILD)/fuzz/fuzz_%.S sw/link.ld
+> @mkdir -p $(BUILD)/prog
+> $(RVAS) $(RVFLAGS) $< -o $(BUILD)/prog/fuzz_$*.o
+> $(RVLD) --no-warn-rwx-segments -m elf32lriscv -T sw/link.ld -o $@ $(BUILD)/prog/fuzz_$*.o
+
+.PHONY: fuzz
+fuzz:
+> python3 scripts/fuzz.py $(FUZZ_FIRST) $(FUZZ_COUNT) $(FUZZ_ITEMS)
