@@ -1,4 +1,6 @@
-module soc_top (
+module soc_top #(
+  parameter int PIPELINED = 0       // 0: single-cycle core, 1: 5-stage pipeline
+) (
   input  logic        clk,
   input  logic        rst,
 
@@ -22,17 +24,31 @@ module soc_top (
   logic [31:0] imem_rdata, dmem_wdata, dmem_rdata;
   logic [3:0]  dmem_be;
 
-  core #(.RESET_PC(BASE)) u_core (
-    .clk(clk), .rst(rst),
-    .imem_addr(imem_addr), .imem_rdata(imem_rdata),
-    .dmem_addr(dmem_addr), .dmem_be(dmem_be),
-    .dmem_wdata(dmem_wdata), .dmem_rdata(dmem_rdata),
-    .ret_valid(ret_valid), .ret_pc(ret_pc), .ret_inst(ret_inst),
-    .ret_rd(ret_rd), .ret_rd_data(ret_rd_data),
-    .ret_mem_re(ret_mem_re), .ret_mem_we(ret_mem_we),
-    .ret_mem_addr(ret_mem_addr), .ret_mem_data(ret_mem_data),
-    .trap(trap)
-  );
+  if (PIPELINED != 0) begin : g_pipe
+    core_pipe #(.RESET_PC(BASE)) u_core (
+      .clk(clk), .rst(rst),
+      .imem_addr(imem_addr), .imem_rdata(imem_rdata),
+      .dmem_addr(dmem_addr), .dmem_be(dmem_be),
+      .dmem_wdata(dmem_wdata), .dmem_rdata(dmem_rdata),
+      .ret_valid(ret_valid), .ret_pc(ret_pc), .ret_inst(ret_inst),
+      .ret_rd(ret_rd), .ret_rd_data(ret_rd_data),
+      .ret_mem_re(ret_mem_re), .ret_mem_we(ret_mem_we),
+      .ret_mem_addr(ret_mem_addr), .ret_mem_data(ret_mem_data),
+      .trap(trap)
+    );
+  end else begin : g_single
+    core #(.RESET_PC(BASE)) u_core (
+      .clk(clk), .rst(rst),
+      .imem_addr(imem_addr), .imem_rdata(imem_rdata),
+      .dmem_addr(dmem_addr), .dmem_be(dmem_be),
+      .dmem_wdata(dmem_wdata), .dmem_rdata(dmem_rdata),
+      .ret_valid(ret_valid), .ret_pc(ret_pc), .ret_inst(ret_inst),
+      .ret_rd(ret_rd), .ret_rd_data(ret_rd_data),
+      .ret_mem_re(ret_mem_re), .ret_mem_we(ret_mem_we),
+      .ret_mem_addr(ret_mem_addr), .ret_mem_data(ret_mem_data),
+      .trap(trap)
+    );
+  end
 
   mem #(.BASE(BASE)) u_mem (
     .clk(clk),
