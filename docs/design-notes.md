@@ -115,3 +115,9 @@ storing x1..x29 so the final register state is part of the trace.
 Not covered: loops, traps, misaligned accesses, CSRs, instructions outside RV32I.
 Failing programs are kept in build/fuzz/ and can be reproduced from the seed.
 - Fuzz run: seeds 1-200 (300 items each), 90843 instructions identical to Spike. Mutation check: sltu compared as signed was caught by 20 of 20 seeds (first mismatch at an sltiu).
+- Step 2 (forwarding from MEM and WB into the ALU inputs, branch comparator and store data): all five
+  directed programs and cosim pass (714 instructions identical). `make fuzz`: 199 of 200 seeds fail.
+  In every first mismatch a load is followed by an instruction that uses its result, and the core's value
+  is computed from the load ADDRESS (forwarding takes ex_mem.alu_result): seed 1 `sll x20,x28,x28` gave
+  0x2c480000 = 0x80000b12 << 18; seed 2 `andi x11,x28,0x6eb` gave 0x2e0 = 0x80000ae0 & 0x6eb; seed 3 stored
+  0x0ad3 (low half of the address) instead of the loaded byte 0x9f. This is the load-use hazard.

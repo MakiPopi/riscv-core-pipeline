@@ -1,9 +1,10 @@
 // 5-stage in-order pipeline: IF, ID, EX, MEM, WB.
 // Same ports as core.sv, so the SoC can use either.
 //
-// Step 1: structure only. A taken branch/jump flushes the two wrong-path
-// instructions behind it, but there is NO data forwarding and NO load-use
-// stall yet, so programs with back-to-back dependencies give wrong results.
+// Step 2: structure + data forwarding. A taken branch/jump flushes the two
+// wrong-path instructions behind it, and EX takes operands from the older
+// instructions in MEM and WB. There is NO load-use stall yet, so an instruction
+// that uses a load result in the very next cycle still gets a wrong value.
 module core_pipe
   import alu_pkg::*;
   import decode_pkg::*;
@@ -38,10 +39,7 @@ module core_pipe
   // ---- Pipeline registers ----
   logic [31:0] pc;
   if_id_t      if_id;
-  // The rs1/rs2 numbers and uses_rs1/uses_rs2 flags are only needed once forwarding exists.
-  /* verilator lint_off UNUSEDSIGNAL */
   id_ex_t      id_ex;
-  /* verilator lint_on UNUSEDSIGNAL */
   ex_mem_t     ex_mem;
   mem_wb_t     mem_wb;
 
@@ -133,23 +131,48 @@ module core_pipe
   end
 
   // ===================== EX: execute and resolve branches =====================
+
+  // ---- Forwarding ----
+  // The operands read in ID can be stale: the instruction that produces them may still be
+  // in the pipeline. Distance 1: the producer is in MEM (ex_mem). Distance 2: it is in WB
+  // (mem_wb). Distance 3 is covered by the register file's bypass, 4 or more by its storage.
+  // If both match, the younger producer (ex_mem) wins.
+  // A LOAD in MEM has no data yet: ex_mem_result would be its address, not its data.
+  // That is the load-use hazard, handled in the next step.
+  logic [31:0] ex_mem_result, fwd_rs1, fwd_rs2;
+  logic        fwd1_mem, fwd1_wb, fwd2_mem, fwd2_wb;
+
+  assign ex_mem_result = (ex_mem.wb_sel == WB_PC4) ? ex_mem.pc + 32'd4 : ex_mem.alu_result;
+
+  assign fwd1_mem = id_ex.uses_rs1 && ex_mem.valid && ex_mem.reg_write &&
+                    ex_mem.rd != 5'd0 && ex_mem.rd == id_ex.rs1;
+  assign fwd1_wb  = id_ex.uses_rs1 && mem_wb.valid && mem_wb.reg_write &&
+                    mem_wb.rd != 5'd0 && mem_wb.rd == id_ex.rs1;
+  assign fwd2_mem = id_ex.uses_rs2 && ex_mem.valid && ex_mem.reg_write &&
+                    ex_mem.rd != 5'd0 && ex_mem.rd == id_ex.rs2;
+  assign fwd2_wb  = id_ex.uses_rs2 && mem_wb.valid && mem_wb.reg_write &&
+                    mem_wb.rd != 5'd0 && mem_wb.rd == id_ex.rs2;
+
+  assign fwd_rs1 = fwd1_mem ? ex_mem_result : fwd1_wb ? wb_data : id_ex.rs1_val;
+  assign fwd_rs2 = fwd2_mem ? ex_mem_result : fwd2_wb ? wb_data : id_ex.rs2_val;
+
   logic [31:0] alu_a, alu_b, alu_result;
 
   always_comb begin
     case (id_ex.a_sel)
-      A_RS1:   alu_a = id_ex.rs1_val;
+      A_RS1:   alu_a = fwd_rs1;
       A_PC:    alu_a = id_ex.pc;
       default: alu_a = 32'b0;              // A_ZERO (lui)
     endcase
   end
 
-  assign alu_b = (id_ex.b_sel == B_IMM) ? id_ex.imm : id_ex.rs2_val;
+  assign alu_b = (id_ex.b_sel == B_IMM) ? id_ex.imm : fwd_rs2;
 
   alu u_alu (.a(alu_a), .b(alu_b), .op(id_ex.alu_op), .result(alu_result));
 
   logic cmp_taken;
   branch_cmp u_branch_cmp (
-    .a(id_ex.rs1_val), .b(id_ex.rs2_val), .funct3(id_ex.funct3), .taken(cmp_taken)
+    .a(fwd_rs1), .b(fwd_rs2), .funct3(id_ex.funct3), .taken(cmp_taken)
   );
 
   logic take_jump, jump_misaligned;
@@ -173,7 +196,7 @@ module core_pipe
       ex_next.rd         = id_ex.rd;
       ex_next.funct3     = id_ex.funct3;
       ex_next.alu_result = alu_result;
-      ex_next.store_data = id_ex.rs2_val;
+      ex_next.store_data = fwd_rs2;
       ex_next.reg_write  = id_ex.reg_write;
       ex_next.wb_sel     = id_ex.wb_sel;
       ex_next.mem_read   = id_ex.mem_read;
