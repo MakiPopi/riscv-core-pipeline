@@ -1,10 +1,10 @@
 // 5-stage in-order pipeline: IF, ID, EX, MEM, WB.
 // Same ports as core.sv, so the SoC can use either.
 //
-// Step 2: structure + data forwarding. A taken branch/jump flushes the two
-// wrong-path instructions behind it, and EX takes operands from the older
-// instructions in MEM and WB. There is NO load-use stall yet, so an instruction
-// that uses a load result in the very next cycle still gets a wrong value.
+// Step 3: structure + data forwarding + load-use stall. A taken branch/jump flushes
+// the two wrong-path instructions behind it, EX takes operands from the older
+// instructions in MEM and WB, and an instruction that needs the result of the load
+// right ahead of it waits one cycle in ID.
 module core_pipe
   import alu_pkg::*;
   import decode_pkg::*;
@@ -45,6 +45,7 @@ module core_pipe
 
   // Signals that cross stage boundaries
   logic        redirect;              // EX: a taken branch/jump changes the PC
+  logic        stall;                 // ID: load-use hazard, hold IF and ID for one cycle
   logic [31:0] redirect_target;
   logic        rf_we;                 // WB: register file write
   logic [31:0] wb_data;
@@ -55,12 +56,13 @@ module core_pipe
   always_ff @(posedge clk) begin
     if (rst)           pc <= RESET_PC;
     else if (redirect) pc <= redirect_target;
-    else               pc <= pc + 32'd4;
+    else if (!stall)   pc <= pc + 32'd4;
   end
 
   always_ff @(posedge clk) begin
     if (rst || redirect) if_id <= '0;      // flush: the instruction fetched now is wrong-path
-    else                 if_id <= '{valid: 1'b1, pc: pc, inst: imem_rdata};
+    else if (!stall)     if_id <= '{valid: 1'b1, pc: pc, inst: imem_rdata};
+    // on a stall IF/ID keeps its value, and the PC holds, so the same instruction is fetched again
   end
 
   // ===================== ID: decode and register read =====================
@@ -94,6 +96,14 @@ module core_pipe
     .raddr1(d_rs1), .raddr2(d_rs2), .rdata1(rf_rdata1), .rdata2(rf_rdata2)
   );
 
+  // Load-use hazard: the instruction in EX is a load, and the instruction in ID needs its result.
+  // The loaded data does not exist before the end of MEM, so ID waits one cycle: the PC and IF/ID
+  // are held and a bubble enters EX. The load then reaches WB while the consumer is in EX, and the
+  // forwarding path from WB delivers the data. (A stall and a redirect cannot happen together:
+  // the first needs a load in EX, the second a branch or jump.)
+  assign stall = if_id.valid && id_ex.valid && id_ex.mem_read && id_ex.rd != 5'd0 &&
+                 ((d_uses_rs1 && d_rs1 == id_ex.rd) || (d_uses_rs2 && d_rs2 == id_ex.rd));
+
   id_ex_t id_next;
 
   always_comb begin
@@ -126,8 +136,8 @@ module core_pipe
   end
 
   always_ff @(posedge clk) begin
-    if (rst || redirect) id_ex <= '0;      // flush: the instruction decoded now is wrong-path
-    else                 id_ex <= id_next;
+    if (rst || redirect || stall) id_ex <= '0;   // flush, or the bubble of a stall
+    else                          id_ex <= id_next;
   end
 
   // ===================== EX: execute and resolve branches =====================
@@ -138,7 +148,7 @@ module core_pipe
   // (mem_wb). Distance 3 is covered by the register file's bypass, 4 or more by its storage.
   // If both match, the younger producer (ex_mem) wins.
   // A LOAD in MEM has no data yet: ex_mem_result would be its address, not its data.
-  // That is the load-use hazard, handled in the next step.
+  // That case never reaches EX: the load-use stall in ID holds the consumer until the load is in WB.
   logic [31:0] ex_mem_result, fwd_rs1, fwd_rs2;
   logic        fwd1_mem, fwd1_wb, fwd2_mem, fwd2_wb;
 
