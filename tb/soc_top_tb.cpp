@@ -33,6 +33,15 @@ static int finish(int status) {
   return status;
 }
 
+// Cycle accounting. 'other' is what stalls and flushes do not explain: the pipeline fill
+// (4 cycles for the 5-stage pipeline, 0 for the single-cycle core).
+static void print_perf(long cycles, long retired, long stalls, long flushes) {
+  long other = cycles - retired - stalls - 2 * flushes;
+  printf("PERF: cycles=%ld instructions=%ld IPC=%.3f | load-use stalls=%ld, "
+         "taken-branch/jump flushes=%ld (2 cycles each), other=%ld\n",
+         cycles, retired, (double)retired / cycles, stalls, flushes, other);
+}
+
 // One trace line per retired instruction:
 //   pc (inst) [x<rd> value] [mem addr [store data]]
 static void print_trace() {
@@ -68,7 +77,7 @@ int main(int argc, char** argv) {
   dut->rst = 0;
   dut->eval();
 
-  long retired = 0;
+  long retired = 0, stalls = 0, flushes = 0;
   for (long cycle = 0; cycle < max_cycles; cycle++) {
     // The outputs now describe the instruction at the current PC. Read them,
     // THEN clock, because the clock edge moves on to the next instruction.
@@ -83,6 +92,7 @@ int main(int argc, char** argv) {
       if (dut->ret_mem_we && dut->ret_mem_addr == EXIT_ADDR) {
         uint32_t code = dut->ret_mem_data;
         printf("EXIT: code=%u (0x%x) after %ld instructions\n", code, code, retired);
+        print_perf(cycle + 1, retired, stalls, flushes);
         if (has_expect) {
           if ((long)code != expect) {
             printf("FAIL: expected %ld\n", expect);
@@ -93,6 +103,8 @@ int main(int argc, char** argv) {
         return finish(0);
       }
     }
+    if (dut->perf_stall) stalls++;
+    if (dut->perf_flush) flushes++;
     tick();
   }
 
