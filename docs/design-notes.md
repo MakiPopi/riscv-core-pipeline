@@ -147,3 +147,52 @@ Failing programs are kept in build/fuzz/ and can be reproduced from the seed.
 - Mutation check on the stall: dropping the rs2 half of the condition fails 15 of 20 seeds, and the first
   mismatch is a store whose data register was loaded by the instruction right above (seed 1: `sh x27` stored
   0x0b2c, the low half of the load address, instead of 0x04cf; seed 5: `sw x3` stored the whole address).
+
+## 5-stage pipeline
+- Stages IF, ID, EX, MEM, WB; pipeline registers are packed structs in `pipe_pkg.sv`. A bubble is
+  the all-zeros value (valid = 0, every control signal 0). Same ports as `core.sv`, so the SoC can
+  use either: `CORE=single|pipe` (Makefile) selects it through the `PIPELINED` parameter of soc_top.
+  `PIPELINED` is an `int` because Verilator's `-G` passes 32-bit constants.
+- Control hazards: branches and jumps resolve in EX, with predict-not-taken. A taken branch flushes
+  IF/ID and ID/EX, a 2-cycle penalty. Traps travel with the instruction and are reported in WB;
+  a trapped instruction writes no register, and a store is blocked while an older instruction traps.
+- Step 1 (no data-hazard handling): all five programs fail. first_loop mismatched at instruction 3
+  (`add` read a register written one instruction earlier). Causes seen: stale values in ALU operations,
+  in `li` of 32-bit constants (lui+addi on one register), in a branch comparison (wrong path taken),
+  and in the exit store (the core ran off the end of the code).
+- Step 2 (forwarding from MEM and WB into the ALU inputs, branch comparator and store data): all five
+  directed programs and cosim pass. `make fuzz`: 199 of 200 seeds fail. In every first mismatch a load is
+  followed by an instruction that uses its result, and the core's value is computed from the load ADDRESS
+  (forwarding takes ex_mem.alu_result): seed 1 `sll x20,x28,x28` gave 0x2c480000 = 0x80000b12 << 18;
+  seed 2 `andi x11,x28,0x6eb` gave 0x2e0 = 0x80000ae0 & 0x6eb; seed 3 stored 0x0ad3 (low half of the
+  address) instead of the loaded byte 0x9f. This is the load-use hazard.
+- Step 3 (load-use stall: if the load in EX writes a source of the instruction in ID, hold the PC and
+  IF/ID for one cycle and put a bubble in EX; the load data then reaches the consumer by forwarding from WB):
+  all five programs and cosim pass; fuzz seeds 1-200 (300 items): 90843 instructions identical to Spike;
+  seeds 1000-1499 (600 items): 500 programs, 411006 instructions identical.
+- Mutation check on the stall: dropping the rs2 half of the condition fails 15 of 20 seeds, and the first
+  mismatch is a store whose data register was loaded by the instruction right above (seed 1: `sh x27` stored
+  0x0b2c, the low half of the load address, instead of 0x04cf; seed 5: `sw x3` stored the whole address).
+
+## Performance accounting (make perf)
+The core exposes two event signals, `perf_stall` (a load-use stall cycle) and `perf_flush` (a taken
+branch/jump redirect, 2 cycles lost). The harness counts cycles and events and prints
+`other = cycles - instructions - stalls - 2*flushes`, which must equal the pipeline fill (4 cycles for
+the 5-stage pipeline, 0 for the single-cycle core); it is a consistency check on the counters.
+Counts stop at the exit store. Real CSR counters (mcycle, minstret) come with the CSR work.
+
+| Program | single-cycle cycles | pipeline cycles | IPC | load-use stalls | flushes |
+|---|---|---|---|---|---|
+| first_loop | 19 | 31 | 0.613 | 0 | 4 |
+| test_alu | 154 | 240 | 0.642 | 0 | 41 |
+| test_branch | 212 | 348 | 0.609 | 0 | 66 |
+| test_jump | 80 | 152 | 0.526 | 0 | 34 |
+| test_mem | 249 | 369 | 0.675 | 0 | 58 |
+| fuzz_1 | 454 | 554 | 0.819 | 4 | 46 |
+
+- other = 4 in every pipeline run and 0 in every single-cycle run.
+- The directed programs are dominated by taken branches (every passing CHECK is a taken beq) and none
+  has a load-use pair (each load is followed by a CHECK that starts with an independent li), so their
+  IPC is not representative. fuzz_1: of 100 lost cycles, 92 are branch/jump flushes, 4 load-use stalls,
+  4 pipeline fill. The random generator's instruction mix is for coverage, not realism: use CoreMark/Dhrystone
+  for results.

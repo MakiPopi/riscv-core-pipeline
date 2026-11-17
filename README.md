@@ -14,8 +14,8 @@ built as a platform for microarchitecture exploration.
 - [x] Co-simulation against Spike: every retired instruction of every test program compared
 - [x] Randomized co-simulation: seeded random programs compared with Spike (`make fuzz`)
 - [ ] riscv-tests
-- [ ] 5-stage pipeline with forwarding and hazard detection
-- [ ] Performance counters (cycles, instructions, IPC)
+- [x] 5-stage pipeline: forwarding, load-use stall, branch flush (verified with cosim and fuzz)
+- [x] Cycle accounting: cycles, IPC, load-use stalls, branch flushes (`make perf`)
 - [ ] Branch prediction (bimodal, gshare, BTB)
 - [ ] Parameterizable L1 I/D caches
 - [ ] M extension, CSRs, exceptions
@@ -41,6 +41,8 @@ in the clone before building).
     make programs                              # run every self-checking program
     make cosim                                 # compare every program with Spike, instruction by instruction
     make fuzz                                  # random programs, each compared with Spike
+    make perf                                  # cycles, IPC and where the lost cycles went
+    # add CORE=single or CORE=pipe (the default) to any of the above to pick the core
     make run PROG=test_alu                     # run one program with a full trace
     make run PROG=first_loop ARGS=+expect=15   # check the exit code
 
@@ -48,6 +50,7 @@ A program ends by storing its exit code to 0x20000000 (Spike has a built-in devi
 0x10000000, so that address cannot be used); 0 means every check passed.
 
 ## Status
-The single-cycle core passes all self-checking programs and matches Spike instruction by
-instruction. Randomized co-simulation and the pipelined core are next. See
-`docs/design-notes.md` for design decisions, verification notes and open items.
+Two cores: a single-cycle baseline (`CORE=single`) and a 5-stage pipeline (`CORE=pipe`, the default).
+Both pass the unit tests, the self-checking programs, Spike co-simulation and the random-program fuzzer.
+Branch prediction and caches are next. See `docs/design-notes.md` for design decisions, results and
+open items.
