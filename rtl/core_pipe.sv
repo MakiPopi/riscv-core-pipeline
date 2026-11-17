@@ -33,7 +33,11 @@ module core_pipe
   output logic [31:0] ret_mem_addr,
   output logic [31:0] ret_mem_data,
 
-  output logic        trap            // a trapping instruction reached write-back
+  output logic        trap,           // a trapping instruction reached write-back
+
+  // Performance events, counted by the harness
+  output logic        perf_stall,     // this cycle is a load-use stall
+  output logic        perf_flush      // a taken branch/jump redirects the PC (2 cycles lost)
 );
 
   // ---- Pipeline registers ----
@@ -284,5 +288,8 @@ module core_pipe
   assign ret_mem_we   = mem_wb.mem_write;
   assign ret_mem_addr = mem_wb.alu_result;
   assign ret_mem_data = mem_wb.mem_data;
+
+  assign perf_stall = stall;
+  assign perf_flush = redirect;
 
 endmodule

@@ -125,3 +125,10 @@ PIPE_RTL := rtl/alu_pkg.sv rtl/decode_pkg.sv rtl/pipe_pkg.sv rtl/alu.sv rtl/deco
 .PHONY: lint-pipe
 lint-pipe:
 > $(VERILATOR) --lint-only -Wall --top-module core_pipe $(PIPE_RTL)
+
+# ---- Performance numbers: make perf [CORE=single|pipe] ----
+.PHONY: perf
+perf: $(PROGRAMS:%=perf-%)
+
+perf-%: soc $(BUILD)/prog/%.mem
+> @printf '%-12s' $*; ./$(SOC_BIN) +hex=$(BUILD)/prog/$*.mem +notrace | sed -n 's/^PERF: //p'

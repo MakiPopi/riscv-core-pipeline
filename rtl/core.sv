@@ -29,7 +29,11 @@ module core
   output logic [31:0] ret_mem_data,   // load: value loaded; store: raw rs2
 
   // Illegal instruction or misaligned jump/access: the core stops
-  output logic        trap
+  output logic        trap,
+
+  // Performance events: a single-cycle core never loses a cycle
+  output logic        perf_stall,
+  output logic        perf_flush
 );
 
   // ===================== Fetch =====================
@@ -154,5 +158,8 @@ module core
   assign ret_mem_we   = mem_write;
   assign ret_mem_addr = alu_result;
   assign ret_mem_data = mem_write ? rs2_val : load_data;
+
+  assign perf_stall = 1'b0;
+  assign perf_flush = 1'b0;
 
 endmodule

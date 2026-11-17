@@ -14,7 +14,9 @@ module soc_top #(
   output logic        ret_mem_we,
   output logic [31:0] ret_mem_addr,
   output logic [31:0] ret_mem_data,
-  output logic        trap
+  output logic        trap,
+  output logic        perf_stall,
+  output logic        perf_flush
 );
 
   // Memory starts here, and so does the PC after reset (Spike's default layout)
@@ -34,7 +36,8 @@ module soc_top #(
       .ret_rd(ret_rd), .ret_rd_data(ret_rd_data),
       .ret_mem_re(ret_mem_re), .ret_mem_we(ret_mem_we),
       .ret_mem_addr(ret_mem_addr), .ret_mem_data(ret_mem_data),
-      .trap(trap)
+      .trap(trap),
+      .perf_stall(perf_stall), .perf_flush(perf_flush)
     );
   end else begin : g_single
     core #(.RESET_PC(BASE)) u_core (
@@ -46,7 +49,8 @@ module soc_top #(
       .ret_rd(ret_rd), .ret_rd_data(ret_rd_data),
       .ret_mem_re(ret_mem_re), .ret_mem_we(ret_mem_we),
       .ret_mem_addr(ret_mem_addr), .ret_mem_data(ret_mem_data),
-      .trap(trap)
+      .trap(trap),
+      .perf_stall(perf_stall), .perf_flush(perf_flush)
     );
   end
 
