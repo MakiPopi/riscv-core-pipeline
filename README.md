@@ -16,6 +16,7 @@ built as a platform for microarchitecture exploration.
 - [ ] riscv-tests
 - [x] 5-stage pipeline: forwarding, load-use stall, branch flush (verified with cosim and fuzz)
 - [x] Cycle accounting: cycles, IPC, load-use stalls, branch flushes (`make perf`)
+- [x] C programs (crt0, linker script) and a first benchmark kernel (insertion sort)
 - [ ] Branch prediction (bimodal, gshare, BTB)
 - [ ] Parameterizable L1 I/D caches
 - [ ] M extension, CSRs, exceptions

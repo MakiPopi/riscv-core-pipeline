@@ -196,3 +196,24 @@ Counts stop at the exit store. Real CSR counters (mcycle, minstret) come with th
   IPC is not representative. fuzz_1: of 100 lost cycles, 92 are branch/jump flushes, 4 load-use stalls,
   4 pipeline fill. The random generator's instruction mix is for coverage, not realism: use CoreMark/Dhrystone
   for results.
+
+## Compiled C programs
+`sw/<name>.c` is linked with `sw/crt0.S` (sets sp to 0x80010000, calls main, stores main's return
+value to the exit address). Flags: `-O2 -march=rv32i -mabi=ilp32 -ffreestanding -fno-builtin
+-fno-tree-loop-distribute-patterns -mno-relax -msmall-data-limit=0 -nostdlib`: no libc, no multiply or
+divide (rv32i has none, so `*` would need libgcc's `__mulsi3`), no compressed instructions, no gp-relative
+data. Programs check themselves and return 0 on success.
+- `bench_sort`: insertion sort of 128 xorshift32 values, checked by sum and by order. 27,025 instructions,
+  identical to Spike. Single-cycle: IPC 1.000. Pipeline: 39,984 cycles, IPC 0.676, 3,983 load-use stalls,
+  4,487 flushes (before the crt0 fix below). Of 12,959 lost cycles: 69% flushes, 31% load-use stalls.
+  If every flush penalty vanished: 31,012 cycles, IPC about 0.87. This is the headroom of a branch
+  predictor on this program; the stalls remain.
+- Accounting caveat: `other = 4` holds only if the instructions after the exit store do not redirect.
+  crt0 originally ended with `j .`; that jump redirected one cycle before the exit store retired, so its
+  flush was counted but its penalty cycles lay after the exit, giving other = 2. Fixed by ending crt0 with
+  `ebreak` (never reached; illegal in our decoder, so it cannot redirect). The `2 * flushes` formula also
+  stops being exact once predictors make the penalty vary.
+- Bug found in my own linker script: `*(COMMON)` was written inside the parentheses of another pattern
+  (syntax error, which broke every program build). It was caught immediately because every program uses the
+  same script.
+- After the crt0 fix (ebreak at the end of crt0): bench_sort cycles=39984, flushes=4486, other=4.
