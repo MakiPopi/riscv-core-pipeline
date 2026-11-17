@@ -121,3 +121,29 @@ Failing programs are kept in build/fuzz/ and can be reproduced from the seed.
   is computed from the load ADDRESS (forwarding takes ex_mem.alu_result): seed 1 `sll x20,x28,x28` gave
   0x2c480000 = 0x80000b12 << 18; seed 2 `andi x11,x28,0x6eb` gave 0x2e0 = 0x80000ae0 & 0x6eb; seed 3 stored
   0x0ad3 (low half of the address) instead of the loaded byte 0x9f. This is the load-use hazard.
+
+## 5-stage pipeline (branch `pipeline`)
+- Stages IF, ID, EX, MEM, WB; pipeline registers are packed structs in `pipe_pkg.sv`. A bubble is
+  the all-zeros value (valid = 0, every control signal 0). Same ports as `core.sv`, so the SoC can
+  use either: `CORE=single|pipe` (Makefile) selects it through the `PIPELINED` parameter of soc_top.
+  `PIPELINED` is an `int` because Verilator's `-G` passes 32-bit constants.
+- Control hazards: branches and jumps resolve in EX, with predict-not-taken. A taken branch flushes
+  IF/ID and ID/EX, a 2-cycle penalty. Traps travel with the instruction and are reported in WB;
+  a trapped instruction writes no register, and a store is blocked while an older instruction traps.
+- Step 1 (no data-hazard handling): all five programs fail. first_loop mismatched at instruction 3
+  (`add` read a register written one instruction earlier). Causes seen: stale values in ALU operations,
+  in `li` of 32-bit constants (lui+addi on one register), in a branch comparison (wrong path taken),
+  and in the exit store (the core ran off the end of the code).
+- Step 2 (forwarding from MEM and WB into the ALU inputs, branch comparator and store data): all five
+  directed programs and cosim pass. `make fuzz`: 199 of 200 seeds fail. In every first mismatch a load is
+  followed by an instruction that uses its result, and the core's value is computed from the load ADDRESS
+  (forwarding takes ex_mem.alu_result): seed 1 `sll x20,x28,x28` gave 0x2c480000 = 0x80000b12 << 18;
+  seed 2 `andi x11,x28,0x6eb` gave 0x2e0 = 0x80000ae0 & 0x6eb; seed 3 stored 0x0ad3 (low half of the
+  address) instead of the loaded byte 0x9f. This is the load-use hazard.
+- Step 3 (load-use stall: if the load in EX writes a source of the instruction in ID, hold the PC and
+  IF/ID for one cycle and put a bubble in EX; the load data then reaches the consumer by forwarding from WB):
+  all five programs and cosim pass; fuzz seeds 1-200 (300 items): 90843 instructions identical to Spike;
+  seeds 1000-1499 (600 items): 500 programs, 411006 instructions identical.
+- Mutation check on the stall: dropping the rs2 half of the condition fails 15 of 20 seeds, and the first
+  mismatch is a store whose data register was loaded by the instruction right above (seed 1: `sh x27` stored
+  0x0b2c, the low half of the load address, instead of 0x04cf; seed 5: `sw x3` stored the whole address).
