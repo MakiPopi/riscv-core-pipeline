@@ -79,7 +79,7 @@ run: soc $(BUILD)/prog/$(PROG).mem
 .SECONDARY:
 
 # ---- Run every test program: make programs ----
-PROGRAMS := first_loop test_alu test_branch test_jump test_mem
+PROGRAMS := first_loop test_alu test_branch test_jump test_mem bench_sort
 EXPECT_first_loop := 15
 
 .PHONY: programs
@@ -132,3 +132,12 @@ perf: $(PROGRAMS:%=perf-%)
 
 perf-%: soc $(BUILD)/prog/%.mem
 > @printf '%-12s' $*; ./$(SOC_BIN) +hex=$(BUILD)/prog/$*.mem +notrace | sed -n 's/^PERF: //p'
+
+# ---- Compiled C programs: sw/<name>.c is linked with sw/crt0.S ----
+RVCC := riscv64-unknown-elf-gcc
+CFLAGS := -O2 -Wall -Wextra -march=rv32i -mabi=ilp32 -ffreestanding -fno-builtin \
+          -fno-tree-loop-distribute-patterns -mno-relax -msmall-data-limit=0
+
+$(BUILD)/prog/%.elf: sw/%.c sw/crt0.S sw/link.ld
+> @mkdir -p $(BUILD)/prog
+> $(RVCC) $(CFLAGS) -nostdlib -static -T sw/link.ld -Wl,--no-warn-rwx-segments -o $@ sw/crt0.S $<
