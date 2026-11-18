@@ -141,3 +141,10 @@ CFLAGS := -O2 -Wall -Wextra -march=rv32i -mabi=ilp32 -ffreestanding -fno-builtin
 $(BUILD)/prog/%.elf: sw/%.c sw/crt0.S sw/link.ld
 > @mkdir -p $(BUILD)/prog
 > $(RVCC) $(CFLAGS) -nostdlib -static -T sw/link.ld -Wl,--no-warn-rwx-segments -o $@ sw/crt0.S $<
+
+# ---- Offline branch predictor study on the benchmark kernels: make bp ----
+BENCHES := bench_sort bench_sieve bench_calls bench_collatz
+
+.PHONY: bp
+bp: soc $(BENCHES:%=$(BUILD)/prog/%.mem)
+> python3 scripts/bp_sim.py $(BENCHES)
