@@ -217,3 +217,21 @@ data. Programs check themselves and return 0 on success.
   (syntax error, which broke every program build). It was caught immediately because every program uses the
   same script.
 - After the crt0 fix (ebreak at the end of crt0): bench_sort cycles=39984, flushes=4486, other=4.
+
+## Baseline: pipeline with predict-not-taken, flush in EX (2-cycle penalty)
+All benchmark kernels pass on both cores and are identical to Spike (sort 27025, sieve 14704, calls 108713,
+collatz 17714 instructions). Single-cycle IPC is 1.000 everywhere. Pipeline:
+
+| Program | Instr. | Cycles | IPC | Load-use stalls | Flushes | Lost to flushes | Lost to stalls | IPC if flushes free | IPC if flush = 1 cycle |
+|---|---|---|---|---|---|---|---|---|---|
+| bench_sort | 27025 | 39984 | 0.676 | 3983 | 4486 | 69% | 31% | 0.871 | 0.761 |
+| bench_sieve | 14704 | 21432 | 0.686 | 998 | 2863 | 85% | 15% | 0.936 | 0.792 |
+| bench_calls | 108713 | 135529 | 0.802 | 300 | 13256 | 99% | 1% | 0.997 | 0.889 |
+| bench_collatz | 17714 | 24436 | 0.725 | 0 | 3359 | 100% | 0% | 1.000 | 0.840 |
+
+- cycles = instructions + stalls + 2 * flushes + 4 holds exactly for every program.
+- The last two columns are upper bounds on what any branch handling can reach, not designs.
+- bench_sieve: 998 stalls = number of outer-loop iterations (load of composite[i] feeds a branch).
+- bench_calls: almost all lost cycles are call/return flushes; a direction predictor cannot predict returns.
+- bench_collatz: hypothesis that gcc if-converted the odd/even choice was doubted afterwards (17714
+  instructions for 3142 steps is too few for branch-free code); to be settled by the predictor study.
