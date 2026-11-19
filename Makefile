@@ -148,3 +148,21 @@ BENCHES := bench_sort bench_sieve bench_calls bench_collatz
 .PHONY: bp
 bp: soc $(BENCHES:%=$(BUILD)/prog/%.mem)
 > python3 scripts/bp_sim.py $(BENCHES)
+
+# ---- Branch direction predictor: unit test in three configurations (INDEX_BITS,HIST_BITS) ----
+BPRED_CFGS := 4,0 6,3 10,10
+
+.PHONY: bpred
+bpred:
+> @for cfg in $(BPRED_CFGS); do \
+>   i=$$(echo $$cfg | cut -d, -f1); h=$$(echo $$cfg | cut -d, -f2); \
+>   d=$(BUILD)/bpred_$${i}_$${h}; mkdir -p $$d; \
+>   echo "== bpred index_bits=$$i hist_bits=$$h =="; \
+>   $(VERILATOR) $(VFLAGS) --top-module bpred -GINDEX_BITS=$$i -GHIST_BITS=$$h --Mdir $$d -o bpred_tb \
+>     -CFLAGS "-DINDEX_BITS=$$i -DHIST_BITS=$$h" rtl/bpred.sv tb/bpred_tb.cpp > $$d/build.log 2>&1 \
+>     || { cat $$d/build.log; exit 1; }; \
+>   grep '%Warning' $$d/build.log || true; \
+>   ./$$d/bpred_tb || exit 1; \
+> done
+
+test: bpred
