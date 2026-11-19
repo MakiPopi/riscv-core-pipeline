@@ -166,3 +166,20 @@ bpred:
 > done
 
 test: bpred
+
+# ---- Branch target buffer: unit test with 4 entries (many conflicts) and 64 entries ----
+BTB_CFGS := 2 6
+
+.PHONY: btb
+btb:
+> @for i in $(BTB_CFGS); do \
+>   d=$(BUILD)/btb_$$i; mkdir -p $$d; \
+>   echo "== btb index_bits=$$i =="; \
+>   $(VERILATOR) $(VFLAGS) --top-module btb -GINDEX_BITS=$$i --Mdir $$d -o btb_tb \
+>     -CFLAGS "-DINDEX_BITS=$$i" rtl/btb.sv tb/btb_tb.cpp > $$d/build.log 2>&1 \
+>     || { cat $$d/build.log; exit 1; }; \
+>   grep '%Warning' $$d/build.log || true; \
+>   ./$$d/btb_tb || exit 1; \
+> done
+
+test: btb
