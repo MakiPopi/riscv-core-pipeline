@@ -42,7 +42,7 @@ static void expect(const char* what, uint32_t got, uint32_t want) {
 
 static void idle() {
   dut->spec_en = 0; dut->spec_taken = 0;
-  dut->fix_en = 0;  dut->fix_hist = 0; dut->fix_taken = 0;
+  dut->fix_en = 0;  dut->fix_hist = 0;
   dut->upd_en = 0;  dut->upd_pc = 0;   dut->upd_hist = 0; dut->upd_taken = 0;
 }
 static void edge() { dut->clk = 1; dut->eval(); dut->clk = 0; dut->eval(); }
@@ -92,12 +92,12 @@ static void directed() {
     expect("history after one taken", dut->hist, 1);
     expect("history selects another counter", look(A), 0);   // index A^1: its counter is still 1
 
-    idle(); dut->fix_en = 1; dut->fix_hist = 0; dut->fix_taken = 0; edge(); idle();
+    idle(); dut->fix_en = 1; dut->fix_hist = 0; edge(); idle();
     expect("fix restores history 0", dut->hist, 0);
     expect("first counter visible again", look(A), 1);
 
     idle();                                                  // fix and spec together: fix wins
-    dut->fix_en = 1; dut->fix_hist = 0; dut->fix_taken = 0;
+    dut->fix_en = 1; dut->fix_hist = 0;
     dut->spec_en = 1; dut->spec_taken = 1;
     edge(); idle();
     expect("fix wins over spec", dut->hist, 0);
@@ -162,7 +162,7 @@ static void test_pipeline(std::mt19937& rng) {
       x = q.front(); q.pop_front();
       mis = (x.pred != x.actual);
       dut->upd_en = 1; dut->upd_pc = x.pcw; dut->upd_hist = x.h; dut->upd_taken = x.actual;
-      if (mis) { dut->fix_en = 1; dut->fix_hist = x.h; dut->fix_taken = x.actual; }
+      if (mis) { dut->fix_en = 1; dut->fix_hist = shift_in(x.h, x.actual); }
     }
     if (do_pred) { dut->spec_en = 1; dut->spec_taken = pred; }
     edge();
