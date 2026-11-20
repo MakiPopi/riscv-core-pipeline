@@ -59,7 +59,7 @@ and caveats are in `docs/design-notes.md`.
   of 500 programs (`make fuzz`).
 - **Mutation checks:** faults planted in the RTL (wrong shift, signed vs unsigned compare, dropped
   `jalr` bit-0 clearing, wrong byte lane, a hazard check missing a source register, a predictor
-  history that is not restored) were each caught by the intended test; see the table in the design notes.
+  history that is not restored, a BTB hit that ignores the tag) were each caught by the intended test; see the table in the design notes.
 
 ## Layout
     rtl/       SystemVerilog sources

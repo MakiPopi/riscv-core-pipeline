@@ -46,6 +46,8 @@
 | halfword select uses addr bit 0 | test_mem | code 13 |
 | `sltu` compared signed | fuzz | 20 of 20 seeds |
 | load-use stall ignores rs2 | fuzz | 15 of 20 seeds (store data from a load) |
+| predictor history restore without the shift | bpred unit test (random pipelined part) | 94,747 of 600,017 checks fail; the bimodal configuration is unaffected |
+| BTB hit ignores the tag | btb unit test | first failure `same index, other tag`; 500,213 of 800,486 checks fail |
 
 ## Performance (`make perf`)
 The core exposes `perf_stall` and `perf_flush`; the harness checks
