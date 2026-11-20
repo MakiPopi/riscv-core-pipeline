@@ -1,16 +1,23 @@
-// 5-stage in-order pipeline: IF, ID, EX, MEM, WB.
-// Same ports as core.sv, so the SoC can use either.
+// 5-stage in-order pipeline: IF, ID, EX, MEM, WB. Same ports as core.sv, so the SoC can use either.
 //
-// Step 3: structure + data forwarding + load-use stall. A taken branch/jump flushes
-// the two wrong-path instructions behind it, EX takes operands from the older
-// instructions in MEM and WB, and an instruction that needs the result of the load
-// right ahead of it waits one cycle in ID.
+// Data hazards: EX takes operands from the older instructions in MEM and WB (forwarding), and an
+// instruction that needs the result of the load right ahead of it waits one cycle in ID.
+//
+// Control hazards: with BP_ENABLE = 1, IF predicts branches and jal with a branch target buffer (BTB)
+// and a direction predictor (bimodal or gshare). The prediction travels with the instruction. EX works
+// out the real next PC; if it differs from the predicted one, EX redirects the PC and flushes the two
+// wrong-path instructions behind it (2 cycles). With BP_ENABLE = 0 nothing is predicted.
 module core_pipe
   import alu_pkg::*;
   import decode_pkg::*;
   import pipe_pkg::*;
 #(
-  parameter logic [31:0] RESET_PC = 32'h8000_0000
+  parameter logic [31:0] RESET_PC       = 32'h8000_0000,
+  parameter int          BP_ENABLE      = 1,    // 0: predict not taken
+  parameter int          BP_INDEX_BITS  = 10,   // log2 of the number of direction counters
+  parameter int          BP_HIST_BITS   = 10,   // global history bits: 0 = bimodal, BP_INDEX_BITS = gshare
+  parameter int          BTB_INDEX_BITS = 6,    // log2 of the number of BTB entries
+  localparam int         HW = (BP_HIST_BITS == 0) ? 1 : BP_HIST_BITS
 ) (
   input  logic        clk,
   input  logic        rst,            // synchronous, active high
@@ -37,7 +44,7 @@ module core_pipe
 
   // Performance events, counted by the harness
   output logic        perf_stall,     // this cycle is a load-use stall
-  output logic        perf_flush      // a taken branch/jump redirects the PC (2 cycles lost)
+  output logic        perf_flush      // a misprediction redirects the PC (2 cycles lost)
 );
 
   // ---- Pipeline registers ----
@@ -47,26 +54,77 @@ module core_pipe
   ex_mem_t     ex_mem;
   mem_wb_t     mem_wb;
 
-  // Signals that cross stage boundaries
-  logic        redirect;              // EX: a taken branch/jump changes the PC
-  logic        stall;                 // ID: load-use hazard, hold IF and ID for one cycle
-  logic [31:0] redirect_target;
-  logic        rf_we;                 // WB: register file write
-  logic [31:0] wb_data;
+  // What IF predicted for the instruction in IF/ID and in ID/EX. Kept beside the structs because
+  // the history width depends on the parameters.
+  logic          ifid_pred_taken, idex_pred_taken;
+  logic [31:2]   ifid_pred_target, idex_pred_target;
+  logic [HW-1:0] ifid_bp_hist, idex_bp_hist;
 
-  // ===================== IF: fetch =====================
+  // Signals that cross stage boundaries
+  logic          redirect;              // EX: the fetched path was wrong, restart from redirect_target
+  logic [31:0]   redirect_target;
+  logic          stall;                 // ID: load-use hazard, hold IF and ID for one cycle
+  logic          rf_we;                 // WB: register file write
+  logic [31:0]   wb_data;
+  logic          cmp_taken;             // EX: the branch condition holds
+  logic [31:0]   actual_target;         // EX: where the instruction goes if it is taken
+  logic [HW-1:0] fix_hist;              // EX: history to restore on a redirect
+  logic          btb_upd_en;            // EX: train the BTB
+  logic          btb_hit, btb_uncond, bp_taken;   // IF: lookup results
+  logic [31:2]   btb_target;
+  logic [HW-1:0] bp_hist;
+
+  // ===================== IF: fetch and predict =====================
   assign imem_addr = pc[31:2];
+
+  // The BTB says "there is a branch or jal at this PC, and it goes to btb_target". For a conditional
+  // branch the direction predictor decides whether to take it. jalr is not predicted (its target varies).
+  logic        pred_taken;
+  logic [31:0] pred_next_pc;
+  logic        fetch_accept;
+
+  assign pred_taken   = (BP_ENABLE != 0) && btb_hit && (btb_uncond || bp_taken);
+  assign pred_next_pc = pred_taken ? {btb_target, 2'b00} : pc + 32'd4;
+  // This fetch moves into IF/ID (it is not held by a stall and not thrown away by a redirect)
+  assign fetch_accept = !rst && !redirect && !stall;
+
+  btb #(.INDEX_BITS(BTB_INDEX_BITS)) u_btb (
+    .clk(clk), .rst(rst),
+    .pc(pc[31:2]), .hit(btb_hit), .target(btb_target), .uncond(btb_uncond),
+    .upd_en(btb_upd_en), .upd_pc(id_ex.pc[31:2]),
+    .upd_target(actual_target[31:2]), .upd_uncond(id_ex.is_jal)
+  );
+
+  // The history is shifted here, once per fetched conditional branch that the BTB knows about (with the
+  // predicted outcome), and restored in EX on a redirect. Training happens in EX with the history that
+  // the branch was predicted with.
+  bpred #(.INDEX_BITS(BP_INDEX_BITS), .HIST_BITS(BP_HIST_BITS)) u_bpred (
+    .clk(clk), .rst(rst),
+    .pc(pc[31:2]), .taken(bp_taken), .hist(bp_hist),
+    .spec_en(fetch_accept && btb_hit && !btb_uncond), .spec_taken(bp_taken),
+    .fix_en(redirect), .fix_hist(fix_hist),
+    .upd_en(id_ex.valid && id_ex.is_branch), .upd_pc(id_ex.pc[31:2]),
+    .upd_hist(idex_bp_hist), .upd_taken(cmp_taken)
+  );
 
   always_ff @(posedge clk) begin
     if (rst)           pc <= RESET_PC;
     else if (redirect) pc <= redirect_target;
-    else if (!stall)   pc <= pc + 32'd4;
+    else if (!stall)   pc <= pred_next_pc;
   end
 
   always_ff @(posedge clk) begin
-    if (rst || redirect) if_id <= '0;      // flush: the instruction fetched now is wrong-path
-    else if (!stall)     if_id <= '{valid: 1'b1, pc: pc, inst: imem_rdata};
-    // on a stall IF/ID keeps its value, and the PC holds, so the same instruction is fetched again
+    if (rst || redirect) begin             // flush: the instruction fetched now is wrong-path
+      if_id            <= '0;
+      ifid_pred_taken  <= 1'b0;
+      ifid_pred_target <= '0;
+      ifid_bp_hist     <= '0;
+    end else if (!stall) begin             // on a stall IF/ID keeps its value and the PC holds
+      if_id            <= '{valid: 1'b1, pc: pc, inst: imem_rdata};
+      ifid_pred_taken  <= pred_taken;
+      ifid_pred_target <= btb_target;
+      ifid_bp_hist     <= bp_hist;
+    end
   end
 
   // ===================== ID: decode and register read =====================
@@ -91,8 +149,8 @@ module core_pipe
     .illegal(d_illegal)
   );
 
-  // The register file is written in WB and read here. BYPASS=1: a read of the register
-  // that WB writes in the same cycle returns the new value (producer 3 instructions ahead).
+  // The register file is written in WB and read here. BYPASS=1: a read of the register that WB writes in
+  // the same cycle returns the new value (producer 3 instructions ahead).
   logic [31:0] rf_rdata1, rf_rdata2;
 
   regfile #(.BYPASS(1'b1)) u_regfile (
@@ -101,10 +159,10 @@ module core_pipe
   );
 
   // Load-use hazard: the instruction in EX is a load, and the instruction in ID needs its result.
-  // The loaded data does not exist before the end of MEM, so ID waits one cycle: the PC and IF/ID
-  // are held and a bubble enters EX. The load then reaches WB while the consumer is in EX, and the
-  // forwarding path from WB delivers the data. (A stall and a redirect cannot happen together:
-  // the first needs a load in EX, the second a branch or jump.)
+  // The loaded data does not exist before the end of MEM, so ID waits one cycle: the PC and IF/ID are
+  // held and a bubble enters EX. The load then reaches WB while the consumer is in EX, and forwarding
+  // from WB delivers the data. (A stall and a redirect cannot happen together: the first needs a load
+  // in EX, the second a branch or jump.)
   assign stall = if_id.valid && id_ex.valid && id_ex.mem_read && id_ex.rd != 5'd0 &&
                  ((d_uses_rs1 && d_rs1 == id_ex.rd) || (d_uses_rs2 && d_rs2 == id_ex.rd));
 
@@ -140,19 +198,27 @@ module core_pipe
   end
 
   always_ff @(posedge clk) begin
-    if (rst || redirect || stall) id_ex <= '0;   // flush, or the bubble of a stall
-    else                          id_ex <= id_next;
+    if (rst || redirect || stall) begin    // flush, or the bubble of a stall
+      id_ex            <= '0;
+      idex_pred_taken  <= 1'b0;
+      idex_pred_target <= '0;
+      idex_bp_hist     <= '0;
+    end else begin
+      id_ex            <= id_next;
+      idex_pred_taken  <= ifid_pred_taken;
+      idex_pred_target <= ifid_pred_target;
+      idex_bp_hist     <= ifid_bp_hist;
+    end
   end
 
-  // ===================== EX: execute and resolve branches =====================
+  // ===================== EX: execute, resolve branches, check the prediction =====================
 
   // ---- Forwarding ----
-  // The operands read in ID can be stale: the instruction that produces them may still be
-  // in the pipeline. Distance 1: the producer is in MEM (ex_mem). Distance 2: it is in WB
-  // (mem_wb). Distance 3 is covered by the register file's bypass, 4 or more by its storage.
-  // If both match, the younger producer (ex_mem) wins.
-  // A LOAD in MEM has no data yet: ex_mem_result would be its address, not its data.
-  // That case never reaches EX: the load-use stall in ID holds the consumer until the load is in WB.
+  // The operands read in ID can be stale: the instruction that produces them may still be in the
+  // pipeline. Distance 1: the producer is in MEM (ex_mem). Distance 2: it is in WB (mem_wb). Distance 3 is
+  // covered by the register file's bypass, 4 or more by its storage. If both match, the younger producer
+  // (ex_mem) wins. A LOAD in MEM has no data yet; that case never reaches EX: the load-use stall in ID
+  // holds the consumer until the load is in WB.
   logic [31:0] ex_mem_result, fwd_rs1, fwd_rs2;
   logic        fwd1_mem, fwd1_wb, fwd2_mem, fwd2_wb;
 
@@ -184,19 +250,33 @@ module core_pipe
 
   alu u_alu (.a(alu_a), .b(alu_b), .op(id_ex.alu_op), .result(alu_result));
 
-  logic cmp_taken;
   branch_cmp u_branch_cmp (
     .a(fwd_rs1), .b(fwd_rs2), .funct3(id_ex.funct3), .taken(cmp_taken)
   );
 
-  logic take_jump, jump_misaligned;
+  // ---- The real outcome of the instruction in EX, and the check against the prediction ----
+  logic        actual_taken, jump_misaligned;
+  logic [31:0] actual_next_pc, predicted_next_pc;
 
-  assign take_jump       = id_ex.valid &&
-                           (id_ex.is_jal || id_ex.is_jalr || (id_ex.is_branch && cmp_taken));
-  // jalr: target = (rs1 + imm) with bit 0 forced to zero
-  assign redirect_target = id_ex.is_jalr ? {alu_result[31:1], 1'b0} : alu_result;
-  assign redirect        = take_jump;
-  assign jump_misaligned = take_jump && (redirect_target[1:0] != 2'b00);
+  assign actual_taken      = id_ex.is_jal || id_ex.is_jalr || (id_ex.is_branch && cmp_taken);
+  // branch/jal target = PC + imm (the ALU result); jalr: (rs1 + imm) with bit 0 forced to zero
+  assign actual_target     = id_ex.is_jalr ? {alu_result[31:1], 1'b0} : alu_result;
+  assign actual_next_pc    = actual_taken ? actual_target : id_ex.pc + 32'd4;
+  assign predicted_next_pc = idex_pred_taken ? {idex_pred_target, 2'b00} : id_ex.pc + 32'd4;
+
+  // Any difference between the PC that was fetched next and the one that should have been: wrong
+  // direction, wrong target, or a prediction on an instruction that is not a branch.
+  assign redirect        = id_ex.valid && (actual_next_pc != predicted_next_pc);
+  assign redirect_target = actual_next_pc;
+  assign jump_misaligned = id_ex.valid && actual_taken && (actual_target[1:0] != 2'b00);
+
+  // History to restore on a redirect: what this instruction saw at fetch, plus its real outcome if it
+  // is a conditional branch. This also discards the shifts made by younger wrong-path branches.
+  assign fix_hist = id_ex.is_branch ? ((idex_bp_hist << 1) | HW'(cmp_taken)) : idex_bp_hist;
+
+  // Train the BTB with every resolved conditional branch and jal, taken or not. A target that is not
+  // word aligned would lose its low bits (and traps anyway), so it is not stored.
+  assign btb_upd_en = id_ex.valid && (id_ex.is_branch || id_ex.is_jal) && (actual_target[1:0] == 2'b00);
 
   ex_mem_t ex_next;
 

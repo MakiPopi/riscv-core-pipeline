@@ -15,7 +15,7 @@ being added next, with the design chosen from measurements.
 - [x] Cycle accounting (`make perf`) and four compiled C benchmark kernels
 - [x] Offline branch predictor study on the kernels (`make bp`)
 - [x] Direction predictor (bimodal/gshare) and branch target buffer, unit-tested (`make bpred`, `make btb`)
-- [ ] Predictor and BTB integrated into the pipeline, measured against the study
+- [x] Predictor and BTB integrated into the pipeline, measured against the study (`make perf PRED=none|bimodal|gshare`)
 - [ ] Return-address stack
 - [ ] riscv-tests, CoreMark/Dhrystone
 - [ ] Parameterizable L1 caches
@@ -23,30 +23,22 @@ being added next, with the design chosen from measurements.
 - [ ] Stretch: superscalar / out-of-order, FPGA synthesis
 
 ## Results so far
-Pipeline with predict-not-taken and resolution in EX (a taken branch or jump costs 2 cycles); the
-single-cycle core has IPC 1.000 on every program.
+Pipeline IPC for three ways of handling branches (the single-cycle core has IPC 1.000 everywhere):
 
-| Kernel | Instructions | Cycles | IPC | Load-use stalls | Taken branch/jump flushes |
-|---|---|---|---|---|---|
-| bench_sort | 27,025 | 39,984 | 0.676 | 3,983 | 4,486 |
-| bench_sieve | 14,704 | 21,432 | 0.686 | 998 | 2,863 |
-| bench_calls | 108,713 | 135,529 | 0.802 | 300 | 13,256 |
-| bench_collatz | 17,714 | 24,436 | 0.725 | 0 | 3,359 |
+| Kernel | Predict not taken | Bimodal 256 + BTB | gshare 1024 + BTB |
+|---|---|---|---|
+| bench_sort | 0.676 | 0.864 | 0.860 |
+| bench_sieve | 0.686 | 0.908 | 0.898 |
+| bench_calls | 0.802 | 0.796 | 0.845 |
+| bench_collatz | 0.725 | 0.893 | 0.895 |
 
-Every lost cycle is accounted for (`cycles = instructions + stalls + 2 x flushes + 4`).
-The offline predictor study replays each kernel's branch outcomes through several predictors:
-
-| Direction accuracy | sort | sieve | calls | collatz |
-|---|---|---|---|---|
-| always not taken | 47.2% | 31.4% | 59.3% | 26.6% |
-| bimodal, 256 counters | 98.4% | 94.0% | 52.1% | 76.8% |
-| gshare, 1024 counters | 97.7% | 92.0% | 93.0% | 77.4% |
-
-On the recursive `bench_calls`, a bimodal predictor is worse than always-not-taken, while gshare
-reaches 93%, so the branch outcome depends on history. Projected IPC with an ideal predictor is
-0.86-0.90 on the loop-heavy kernels; `bench_calls` is limited by its 9,164 calls and returns, which
-need a return-address stack. These are projections, not measurements of the hardware yet. Details
-and caveats are in `docs/design-notes.md`.
+Every lost cycle is accounted for (`cycles = instructions + stalls + 2 x redirects + 4`). The hardware
+flush counts match an offline model fed with the programs' branch traces: for bimodal, the model's
+mispredictions plus the calls/returns the pipeline never predicts, to within 1 or 2. That model predicted
+that bimodal would be slower than no prediction on the recursive `bench_calls` (it is) and that gshare
+would fix it (it does, 5% fewer cycles). What is left: load-use stalls dominate the loop kernels (93% of
+the remaining lost cycles in `bench_sort`), and returns dominate `bench_calls` (9,164 of its 9,844
+redirects), which a return-address stack would remove. Details and caveats: `docs/design-notes.md`.
 
 ## Verification
 - **Unit testbenches** for every module: hand-derived directed cases plus random cases against an
@@ -79,7 +71,7 @@ riscv-software-src/riscv-isa-sim (run `git submodule update --init --recursive` 
     make programs        # run every self-checking program
     make cosim           # compare every program with Spike, instruction by instruction
     make fuzz            # random programs, each compared with Spike
-    make perf            # cycles, IPC and where the lost cycles went
+    make perf            # cycles, IPC and where the lost cycles went (PRED=none|bimodal|gshare)
     make bp              # offline branch predictor study on the benchmark kernels
     make run PROG=test_alu                     # run one program with a full trace
     make run PROG=first_loop ARGS=+expect=15   # check the exit code

@@ -102,3 +102,32 @@ gcc had made the Collatz branch branch-free (the predictor study showed otherwis
 - Misaligned jumps/accesses should become real exceptions; ecall, ebreak, CSRs and the M extension decode as illegal.
 - fence is a no-op (no caches yet). riscv-tests and CoreMark are not run yet.
 - Cleanup: remove `sw/first_loop.mem` and the `run-first` Makefile target.
+
+## Branch prediction in the pipeline (measured)
+IF looks up a direct-mapped BTB (64 entries, full tags) and a direction predictor (`PRED=bimodal`: 256 counters;
+`PRED=gshare`: 1024 counters, 10 history bits; `PRED=none`: the old predict-not-taken). Each instruction carries what
+was predicted; EX recomputes the next PC and redirects (2 cycles) when it differs, which covers a wrong direction, a
+wrong target and a prediction on a non-branch. jalr is never predicted. The BTB is trained on every conditional
+branch and jal, taken or not (so the history knows about every branch after its first sighting). The global history
+is shifted at fetch with the predicted outcome (only for branches that hit the BTB) and restored in EX on any
+redirect; training uses the history the branch was predicted with. A history shift happens once per instruction, not
+while a load-use stall holds the fetch.
+
+Regression: PRED=none reproduces the old pipeline exactly. With prediction on, all programs, cosim (same counts)
+and both fuzz runs (90,843 and 411,006 instructions) are unchanged. other = 4 everywhere.
+
+| Kernel | none: IPC (cycles) | bimodal: IPC (cycles, flushes) | gshare: IPC (cycles, flushes) |
+|---|---|---|---|
+| bench_sort | 0.676 (39,984) | 0.864 (31,296, 142) | 0.860 (31,408, 198) |
+| bench_sieve | 0.686 (21,432) | 0.908 (16,194, 244) | 0.898 (16,378, 336) |
+| bench_calls | 0.802 (135,529) | 0.796 (136,517, 13,750) | 0.845 (128,705, 9,844) |
+| bench_collatz | 0.725 (24,436) | 0.893 (19,846, 1,064) | 0.895 (19,792, 1,037) |
+
+- Bimodal flushes = study's mispredictions + jalr + 1 or 2 (probably first sightings of jal): sort 139+2+1,
+  sieve 240+2+2, calls 4,584+9,164+2, collatz 1,061+2+1. gshare differs from the study by -1, +11, +8, +3 flushes
+  (my explanation, unverified: the hardware history is speculative and only includes branches the BTB knows).
+- bench_calls with bimodal is slower than predicting nothing (as the study said); gshare is 5.0% faster in cycles.
+- Remaining loss: load-use stalls on sort (93%) and sieve (67%); jalr on calls (9,164 of 9,844 redirects, IPC would be
+  about 0.985 without them); collatz is limited by a near-random branch.
+- A wrong history or predictor never breaks correctness, only the flush count, so cosim and fuzz cannot detect it;
+  quality is checked by comparing flush counts with the model.

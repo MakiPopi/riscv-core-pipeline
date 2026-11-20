@@ -1,5 +1,12 @@
 module soc_top #(
-  parameter int PIPELINED = 0       // 0: single-cycle core, 1: 5-stage pipeline
+  parameter int PIPELINED = 0,         // 0: single-cycle core, 1: 5-stage pipeline
+  // Branch handling of the pipeline (ignored by the single-cycle core)
+  /* verilator lint_off UNUSEDPARAM */
+  parameter int BP_ENABLE      = 1,
+  parameter int BP_INDEX_BITS  = 10,
+  parameter int BP_HIST_BITS   = 10,
+  parameter int BTB_INDEX_BITS = 6
+  /* verilator lint_on UNUSEDPARAM */
 ) (
   input  logic        clk,
   input  logic        rst,
@@ -27,7 +34,10 @@ module soc_top #(
   logic [3:0]  dmem_be;
 
   if (PIPELINED != 0) begin : g_pipe
-    core_pipe #(.RESET_PC(BASE)) u_core (
+    core_pipe #(
+      .RESET_PC(BASE), .BP_ENABLE(BP_ENABLE), .BP_INDEX_BITS(BP_INDEX_BITS),
+      .BP_HIST_BITS(BP_HIST_BITS), .BTB_INDEX_BITS(BTB_INDEX_BITS)
+    ) u_core (
       .clk(clk), .rst(rst),
       .imem_addr(imem_addr), .imem_rdata(imem_rdata),
       .dmem_addr(dmem_addr), .dmem_be(dmem_be),

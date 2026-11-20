@@ -20,8 +20,7 @@ module bpred #(
   input  logic          spec_en,
   input  logic          spec_taken,
   input  logic          fix_en,      // wins over spec_en
-  input  logic [HW-1:0] fix_hist,    // the history that branch was predicted with
-  input  logic          fix_taken,   // its real outcome
+  input  logic [HW-1:0] fix_hist,    // the complete history to restore (the core computes it)
 
   // Training, when a branch resolves
   input  logic          upd_en,
@@ -61,7 +60,7 @@ module bpred #(
 
   always_ff @(posedge clk) begin
     if (rst)          hist_q <= '0;
-    else if (fix_en)  hist_q <= (fix_hist << 1) | HW'(fix_taken);
+    else if (fix_en)  hist_q <= fix_hist;
     else if (spec_en) hist_q <= (hist_q << 1) | HW'(spec_taken);
   end
 
