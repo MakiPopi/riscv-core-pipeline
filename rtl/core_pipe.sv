@@ -17,6 +17,8 @@ module core_pipe
   parameter int          BP_INDEX_BITS  = 10,   // log2 of the number of direction counters
   parameter int          BP_HIST_BITS   = 10,   // global history bits: 0 = bimodal, BP_INDEX_BITS = gshare
   parameter int          BTB_INDEX_BITS = 6,    // log2 of the number of BTB entries
+  parameter int          RAS_ENABLE     = 1,    // 1: predict returns and jalr targets (return-address stack)
+  parameter int          RAS_DEPTH_LOG2 = 3,    // log2 of the number of return-stack entries
   localparam int         HW = (BP_HIST_BITS == 0) ? 1 : BP_HIST_BITS
 ) (
   input  logic        clk,
@@ -72,6 +74,11 @@ module core_pipe
   logic          btb_upd_en;            // EX: train the BTB
   logic          btb_hit, btb_uncond, bp_taken;   // IF: lookup results
   logic [31:2]   btb_target;
+  logic          btb_call, btb_ret;     // IF: the BTB entry is a call / a return
+  logic [31:2]   ras_top;               // IF: predicted return address
+  logic          ex_call, ex_ret;       // EX: the instruction is a call / a return
+  // Returns are only predicted when the predictor itself is on
+  localparam int RAS_ON = ((BP_ENABLE != 0) && (RAS_ENABLE != 0)) ? 1 : 0;
   logic [HW-1:0] bp_hist;
 
   // ===================== IF: fetch and predict =====================
@@ -83,16 +90,21 @@ module core_pipe
   logic [31:0] pred_next_pc;
   logic        fetch_accept;
 
+  logic [31:2] pred_target;
+  // A return takes its target from the return stack, everything else from the BTB
+  assign pred_target  = btb_ret ? ras_top : btb_target;
   assign pred_taken   = (BP_ENABLE != 0) && btb_hit && (btb_uncond || bp_taken);
-  assign pred_next_pc = pred_taken ? {btb_target, 2'b00} : pc + 32'd4;
+  assign pred_next_pc = pred_taken ? {pred_target, 2'b00} : pc + 32'd4;
   // This fetch moves into IF/ID (it is not held by a stall and not thrown away by a redirect)
   assign fetch_accept = !rst && !redirect && !stall;
 
   btb #(.INDEX_BITS(BTB_INDEX_BITS)) u_btb (
     .clk(clk), .rst(rst),
     .pc(pc[31:2]), .hit(btb_hit), .target(btb_target), .uncond(btb_uncond),
+    .is_call(btb_call), .is_ret(btb_ret),
     .upd_en(btb_upd_en), .upd_pc(id_ex.pc[31:2]),
-    .upd_target(actual_target[31:2]), .upd_uncond(id_ex.is_jal)
+    .upd_target(actual_target[31:2]), .upd_uncond(id_ex.is_jal || id_ex.is_jalr),
+    .upd_call(ex_call), .upd_ret(ex_ret)
   );
 
   // The history is shifted here, once per fetched conditional branch that the BTB knows about (with the
@@ -105,6 +117,18 @@ module core_pipe
     .fix_en(redirect), .fix_hist(fix_hist),
     .upd_en(id_ex.valid && id_ex.is_branch), .upd_pc(id_ex.pc[31:2]),
     .upd_hist(idex_bp_hist), .upd_taken(cmp_taken)
+  );
+
+  // Return-address stack: IF pushes and pops a speculative copy as it predicts; EX applies the calls and
+  // returns that really execute to a committed copy, which replaces the speculative one on every redirect.
+  ras #(.DEPTH_LOG2(RAS_DEPTH_LOG2)) u_ras (
+    .clk(clk), .rst(rst),
+    .top_addr(ras_top),
+    .push((RAS_ON != 0) && fetch_accept && btb_hit && btb_call), .push_val(pc[31:2] + 30'd1),
+    .pop((RAS_ON != 0) && fetch_accept && btb_hit && btb_ret),
+    .c_push((RAS_ON != 0) && id_ex.valid && ex_call), .c_push_val(id_ex.pc[31:2] + 30'd1),
+    .c_pop((RAS_ON != 0) && id_ex.valid && ex_ret),
+    .restore(redirect)
   );
 
   always_ff @(posedge clk) begin
@@ -122,7 +146,7 @@ module core_pipe
     end else if (!stall) begin             // on a stall IF/ID keeps its value and the PC holds
       if_id            <= '{valid: 1'b1, pc: pc, inst: imem_rdata};
       ifid_pred_taken  <= pred_taken;
-      ifid_pred_target <= btb_target;
+      ifid_pred_target <= pred_target;
       ifid_bp_hist     <= bp_hist;
     end
   end
@@ -276,7 +300,16 @@ module core_pipe
 
   // Train the BTB with every resolved conditional branch and jal, taken or not. A target that is not
   // word aligned would lose its low bits (and traps anyway), so it is not stored.
-  assign btb_upd_en = id_ex.valid && (id_ex.is_branch || id_ex.is_jal) && (actual_target[1:0] == 2'b00);
+  // Calls and returns (RISC-V hints): x1 and x5 are link registers. A call writes one (jal or jalr);
+  // a return is a jalr that reads one and writes none.
+  logic rd_link, rs1_link;
+  assign rd_link  = (id_ex.rd  == 5'd1) || (id_ex.rd  == 5'd5);
+  assign rs1_link = (id_ex.rs1 == 5'd1) || (id_ex.rs1 == 5'd5);
+  assign ex_call  = (id_ex.is_jal || id_ex.is_jalr) && rd_link;
+  assign ex_ret   = id_ex.is_jalr && rs1_link && !rd_link;
+
+  assign btb_upd_en = id_ex.valid && (id_ex.is_branch || id_ex.is_jal || ((RAS_ON != 0) && id_ex.is_jalr)) &&
+                      (actual_target[1:0] == 2'b00);
 
   ex_mem_t ex_next;
 

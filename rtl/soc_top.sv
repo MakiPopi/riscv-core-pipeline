@@ -5,7 +5,9 @@ module soc_top #(
   parameter int BP_ENABLE      = 1,
   parameter int BP_INDEX_BITS  = 10,
   parameter int BP_HIST_BITS   = 10,
-  parameter int BTB_INDEX_BITS = 6
+  parameter int BTB_INDEX_BITS = 6,
+  parameter int RAS_ENABLE     = 1,
+  parameter int RAS_DEPTH_LOG2 = 3
   /* verilator lint_on UNUSEDPARAM */
 ) (
   input  logic        clk,
@@ -36,7 +38,8 @@ module soc_top #(
   if (PIPELINED != 0) begin : g_pipe
     core_pipe #(
       .RESET_PC(BASE), .BP_ENABLE(BP_ENABLE), .BP_INDEX_BITS(BP_INDEX_BITS),
-      .BP_HIST_BITS(BP_HIST_BITS), .BTB_INDEX_BITS(BTB_INDEX_BITS)
+      .BP_HIST_BITS(BP_HIST_BITS), .BTB_INDEX_BITS(BTB_INDEX_BITS),
+      .RAS_ENABLE(RAS_ENABLE), .RAS_DEPTH_LOG2(RAS_DEPTH_LOG2)
     ) u_core (
       .clk(clk), .rst(rst),
       .imem_addr(imem_addr), .imem_rdata(imem_rdata),
