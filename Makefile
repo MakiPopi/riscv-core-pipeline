@@ -190,3 +190,20 @@ BTB_BITS ?= 6
 BP_ENABLE := $(if $(filter none,$(PRED)),0,1)
 BP_INDEX  := $(if $(filter bimodal,$(PRED)),8,10)
 BP_HIST   := $(if $(filter bimodal,$(PRED)),0,10)
+
+# ---- Return-address stack: unit test with 2 and 8 entries (log2 = 1, 3) ----
+RAS_CFGS := 1 3
+
+.PHONY: ras
+ras:
+> @for i in $(RAS_CFGS); do \
+>   d=$(BUILD)/ras_$$i; mkdir -p $$d; \
+>   echo "== ras depth_log2=$$i =="; \
+>   $(VERILATOR) $(VFLAGS) --top-module ras -GDEPTH_LOG2=$$i --Mdir $$d -o ras_tb \
+>     -CFLAGS "-DDEPTH_LOG2=$$i" rtl/ras.sv tb/ras_tb.cpp > $$d/build.log 2>&1 \
+>     || { cat $$d/build.log; exit 1; }; \
+>   grep '%Warning' $$d/build.log || true; \
+>   ./$$d/ras_tb || exit 1; \
+> done
+
+test: ras
