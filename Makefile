@@ -79,7 +79,7 @@ run: soc $(BUILD)/prog/$(PROG).mem
 .SECONDARY:
 
 # ---- Run every test program: make programs ----
-PROGRAMS := first_loop test_alu test_branch test_jump test_mem bench_sort bench_sieve bench_calls bench_collatz
+PROGRAMS := first_loop test_alu test_branch test_jump test_mem bench_sort bench_sieve bench_calls bench_collatz bench_ras_stress
 EXPECT_first_loop := 15
 
 .PHONY: programs
