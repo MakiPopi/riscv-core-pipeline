@@ -211,3 +211,8 @@ test: ras
 # Return-address stack in the pipeline: make perf RAS=0|1 RAS_DEPTH=<log2 of entries>
 RAS ?= 1
 RAS_DEPTH ?= 3
+
+# ---- Markdown tables of IPC and redirects for all branch-handling configurations (slow) ----
+.PHONY: perf-table
+perf-table:
+> python3 scripts/perf_table.py
