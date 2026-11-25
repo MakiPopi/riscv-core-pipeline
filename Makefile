@@ -131,7 +131,7 @@ lint-pipe:
 perf: $(PROGRAMS:%=perf-%)
 
 perf-%: soc $(BUILD)/prog/%.mem
-> @printf '%-14s' $*; ./$(SOC_BIN) +hex=$(BUILD)/prog/$*.mem +notrace | sed -n 's/^PERF: //p'
+> @printf '%-16s' $*; ./$(SOC_BIN) +hex=$(BUILD)/prog/$*.mem +notrace | sed -n 's/^PERF: //p'
 
 # ---- Compiled C programs: sw/<name>.c is linked with sw/crt0.S ----
 RVCC := riscv64-unknown-elf-gcc

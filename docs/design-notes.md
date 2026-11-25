@@ -172,3 +172,20 @@ Redirects (each costs 2 cycles):
 | bench_sieve | 2,863 | 244 | 336 | 244 | 336 |
 | bench_calls | 13,256 | 13,750 | 9,844 | 5,095 | 1,189 |
 | bench_collatz | 3,359 | 1,064 | 1,037 | 1,064 | 1,037 |
+
+## Return-stack stress test (`bench_ras_stress`)
+A coin-flip branch (xorshift32 bit 0, which changes 505 times in 1,000 iterations) whose wrong path contains a call
+(`jal t0, f`) or a return (`ret`), so a mispredicted branch pushes or pops the speculative stack wrongly. Self-check:
+f runs 510 times (computed in Python). Cosim: 13,538 instructions identical.
+
+| Configuration | Redirects | Cycles | IPC |
+|---|---|---|---|
+| stack off | 2,070 | 17,682 | 0.766 |
+| stack on, repair on | 562 | 14,666 | 0.923 |
+| stack on, repair off (mutation: `.restore(1'b0)`) | 1,081 | 15,704 | 0.862 |
+
+- The stack removes 1,508 redirects: the 1,510 returns minus 2 (probably the first sighting of each return).
+- Disabling the repair costs 519 redirects, about one per mispredicted branch.
+- `bench_calls` gives identical results with the repair disabled (1,189 redirects either way): none of the four kernels
+  exercises the repair, which is why this program exists. Correctness tests cannot see a wrong stack, because a wrong
+  prediction only costs cycles; only the redirect counts can.
