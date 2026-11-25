@@ -16,7 +16,7 @@ being added next, with the design chosen from measurements.
 - [x] Offline branch predictor study on the kernels (`make bp`)
 - [x] Direction predictor (bimodal/gshare) and branch target buffer, unit-tested (`make bpred`, `make btb`)
 - [x] Predictor and BTB integrated into the pipeline, measured against the study (`make perf PRED=none|bimodal|gshare`)
-- [ ] Return-address stack
+- [x] Return-address stack (`make perf RAS=0|1`)
 - [ ] riscv-tests, CoreMark/Dhrystone
 - [ ] Parameterizable L1 caches
 - [ ] M extension, CSRs, exceptions
@@ -37,8 +37,7 @@ flush counts match an offline model fed with the programs' branch traces: for bi
 mispredictions plus the calls/returns the pipeline never predicts, to within 1 or 2. That model predicted
 that bimodal would be slower than no prediction on the recursive `bench_calls` (it is) and that gshare
 would fix it (it does, 5% fewer cycles). What is left: load-use stalls dominate the loop kernels (93% of
-the remaining lost cycles in `bench_sort`), and returns dominate `bench_calls` (9,164 of its 9,844
-redirects), which a return-address stack would remove. Details and caveats: `docs/design-notes.md`.
+the remaining lost cycles in `bench_sort`), and calls and returns dominated `bench_calls` (9,164 of its 9,844 redirects) until the return-address stack went in: with it `bench_calls` runs at IPC 0.976 (111,395 cycles, 1,189 redirects left). Details and caveats: `docs/design-notes.md`.
 
 ## Verification
 - **Unit testbenches** for every module: hand-derived directed cases plus random cases against an

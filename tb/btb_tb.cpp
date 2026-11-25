@@ -15,7 +15,7 @@ static Vbtb* dut;
 static int errors = 0, checks = 0;
 
 // ---- Independent model ----
-struct Entry { bool valid; uint32_t tag, target; bool uncond; };
+struct Entry { bool valid; uint32_t tag, target; bool uncond, call, ret; };
 static Entry model[1u << INDEX_BITS];
 
 static uint32_t idx_of(uint32_t pcw) { return pcw & (ENTRIES - 1); }
@@ -31,6 +31,7 @@ static void expect(const char* what, uint32_t pcw, uint32_t got, uint32_t want) 
 
 static void no_update() {
   dut->upd_en = 0; dut->upd_pc = 0; dut->upd_target = 0; dut->upd_uncond = 0;
+  dut->upd_call = 0; dut->upd_ret = 0;
 }
 static void edge() { dut->clk = 1; dut->eval(); dut->clk = 0; dut->eval(); }
 
@@ -43,13 +44,16 @@ static void check(const char* what, uint32_t pcw) {
   expect(what, pcw, dut->hit, hit);
   expect(what, pcw, dut->target, hit ? e.target : 0);
   expect(what, pcw, dut->uncond, hit && e.uncond);
+  expect(what, pcw, dut->is_call, hit && e.call);
+  expect(what, pcw, dut->is_ret, hit && e.ret);
 }
 
-static void update(uint32_t pcw, uint32_t target, bool uncond) {
+static void update(uint32_t pcw, uint32_t target, bool uncond, bool call = false, bool ret = false) {
   dut->upd_en = 1; dut->upd_pc = pcw; dut->upd_target = target; dut->upd_uncond = uncond;
+  dut->upd_call = call; dut->upd_ret = ret;
   edge();
   no_update();
-  model[idx_of(pcw)] = {true, tag_of(pcw), target, uncond};
+  model[idx_of(pcw)] = {true, tag_of(pcw), target, uncond, call, ret};
 }
 
 static void reset() {
@@ -132,12 +136,30 @@ static void test_random(std::mt19937& rng) {
       // The update happens at the next edge, with the lookup still on the input
       dut->upd_en = 1; dut->upd_pc = upc;
       dut->upd_target = rng() & WMASK; dut->upd_uncond = rng() & 1;
-      uint32_t t = dut->upd_target; bool u = dut->upd_uncond;
+      dut->upd_call = rng() & 1; dut->upd_ret = rng() & 1;
+      uint32_t t = dut->upd_target; bool u = dut->upd_uncond, c = dut->upd_call, r = dut->upd_ret;
       check("random lookup during an update (no bypass)", pcw);
       edge(); no_update();
-      model[idx_of(upc)] = {true, tag_of(upc), t, u};
+      model[idx_of(upc)] = {true, tag_of(upc), t, u, c, r};
     }
   }
+}
+
+// The call and return flags are stored per entry and read back with it
+static void directed_flags() {
+  reset();
+  const uint32_t A = 0x0012345, B = A ^ (1u << INDEX_BITS);   // same index, different tag
+  update(A, 0x100, true, true, false);                         // a call
+  dut->pc = A; dut->eval();
+  expect("call flag", A, dut->is_call, 1);
+  expect("a call is not a return", A, dut->is_ret, 0);
+  update(B, 0x200, true, false, true);                         // replaces A: a return
+  dut->pc = B; dut->eval();
+  expect("return flag", B, dut->is_ret, 1);
+  expect("a return is not a call", B, dut->is_call, 0);
+  dut->pc = A; dut->eval();
+  expect("miss: call flag is 0", A, dut->is_call, 0);
+  expect("miss: return flag is 0", A, dut->is_ret, 0);
 }
 
 int main(int argc, char** argv) {
@@ -147,6 +169,7 @@ int main(int argc, char** argv) {
   std::mt19937 rng(1);   // fixed seed, so failures are reproducible
 
   directed();
+  directed_flags();
   test_random(rng);
 
   dut->final();

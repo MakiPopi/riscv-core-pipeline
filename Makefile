@@ -40,14 +40,14 @@ CORE_RTL := rtl/alu_pkg.sv rtl/decode_pkg.sv rtl/alu.sv rtl/decoder.sv rtl/regfi
 lint:
 > $(VERILATOR) --lint-only -Wall --top-module core $(CORE_RTL)
 
-SOC_RTL := $(CORE_RTL) rtl/pipe_pkg.sv rtl/bpred.sv rtl/btb.sv rtl/core_pipe.sv rtl/mem.sv rtl/soc_top.sv
+SOC_RTL := $(CORE_RTL) rtl/pipe_pkg.sv rtl/bpred.sv rtl/btb.sv rtl/ras.sv rtl/core_pipe.sv rtl/mem.sv rtl/soc_top.sv
 SOC_BIN := $(BUILD)/soc_top/soc_top_tb
 
 .PHONY: soc run-first
 
 soc:
 > @mkdir -p $(BUILD)/soc_top
-> @$(VERILATOR) $(VFLAGS) --top-module soc_top -GPIPELINED=$(PIPELINED) -GBP_ENABLE=$(BP_ENABLE) -GBP_INDEX_BITS=$(BP_INDEX) -GBP_HIST_BITS=$(BP_HIST) -GBTB_INDEX_BITS=$(BTB_BITS) --Mdir $(BUILD)/soc_top -o soc_top_tb \
+> @$(VERILATOR) $(VFLAGS) --top-module soc_top -GPIPELINED=$(PIPELINED) -GBP_ENABLE=$(BP_ENABLE) -GBP_INDEX_BITS=$(BP_INDEX) -GBP_HIST_BITS=$(BP_HIST) -GBTB_INDEX_BITS=$(BTB_BITS) -GRAS_ENABLE=$(RAS) -GRAS_DEPTH_LOG2=$(RAS_DEPTH) --Mdir $(BUILD)/soc_top -o soc_top_tb \
 >     $(SOC_RTL) tb/soc_top_tb.cpp > $(BUILD)/soc_top/build.log 2>&1 \
 >     || (cat $(BUILD)/soc_top/build.log; exit 1)
 > @grep '%Warning' $(BUILD)/soc_top/build.log || true
@@ -120,7 +120,7 @@ CORE ?= pipe
 PIPELINED := $(if $(filter pipe,$(CORE)),1,0)
 
 PIPE_RTL := rtl/alu_pkg.sv rtl/decode_pkg.sv rtl/pipe_pkg.sv rtl/alu.sv rtl/decoder.sv \
-            rtl/regfile.sv rtl/branch_cmp.sv rtl/lsu.sv rtl/bpred.sv rtl/btb.sv rtl/core_pipe.sv
+            rtl/regfile.sv rtl/branch_cmp.sv rtl/lsu.sv rtl/bpred.sv rtl/btb.sv rtl/ras.sv rtl/core_pipe.sv
 
 .PHONY: lint-pipe
 lint-pipe:
@@ -190,3 +190,29 @@ BTB_BITS ?= 6
 BP_ENABLE := $(if $(filter none,$(PRED)),0,1)
 BP_INDEX  := $(if $(filter bimodal,$(PRED)),8,10)
 BP_HIST   := $(if $(filter bimodal,$(PRED)),0,10)
+
+# ---- Return-address stack: unit test with 2 and 8 entries (log2 = 1, 3) ----
+RAS_CFGS := 1 3
+
+.PHONY: ras
+ras:
+> @for i in $(RAS_CFGS); do \
+>   d=$(BUILD)/ras_$$i; mkdir -p $$d; \
+>   echo "== ras depth_log2=$$i =="; \
+>   $(VERILATOR) $(VFLAGS) --top-module ras -GDEPTH_LOG2=$$i --Mdir $$d -o ras_tb \
+>     -CFLAGS "-DDEPTH_LOG2=$$i" rtl/ras.sv tb/ras_tb.cpp > $$d/build.log 2>&1 \
+>     || { cat $$d/build.log; exit 1; }; \
+>   grep '%Warning' $$d/build.log || true; \
+>   ./$$d/ras_tb || exit 1; \
+> done
+
+test: ras
+
+# Return-address stack in the pipeline: make perf RAS=0|1 RAS_DEPTH=<log2 of entries>
+RAS ?= 1
+RAS_DEPTH ?= 3
+
+# ---- Markdown tables of IPC and redirects for all branch-handling configurations (slow) ----
+.PHONY: perf-table
+perf-table:
+> python3 scripts/perf_table.py
