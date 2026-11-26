@@ -122,6 +122,16 @@ static const Entry table[] = {
   {"or",    FMT_R, 0x33,  6, 0x00, OR,   A_RS1,  B_RS2, 1, WB_ALU, 0,0,0,0,0, 1,1, true},
   {"and",   FMT_R, 0x33,  7, 0x00, AND,  A_RS1,  B_RS2, 1, WB_ALU, 0,0,0,0,0, 1,1, true},
 
+  // M extension: funct7 = 0x01, alu_op/a_sel/b_sel are not meaningful (the multiply/divide unit does the work)
+  {"mul", FMT_R, 0x33, 0, 0x01, ADD, A_RS1, B_RS2, 1, WB_ALU, 0,0,0,0,0, 1,1, false},
+  {"mulh", FMT_R, 0x33, 1, 0x01, ADD, A_RS1, B_RS2, 1, WB_ALU, 0,0,0,0,0, 1,1, false},
+  {"mulhsu", FMT_R, 0x33, 2, 0x01, ADD, A_RS1, B_RS2, 1, WB_ALU, 0,0,0,0,0, 1,1, false},
+  {"mulhu", FMT_R, 0x33, 3, 0x01, ADD, A_RS1, B_RS2, 1, WB_ALU, 0,0,0,0,0, 1,1, false},
+  {"div", FMT_R, 0x33, 4, 0x01, ADD, A_RS1, B_RS2, 1, WB_ALU, 0,0,0,0,0, 1,1, false},
+  {"divu", FMT_R, 0x33, 5, 0x01, ADD, A_RS1, B_RS2, 1, WB_ALU, 0,0,0,0,0, 1,1, false},
+  {"rem", FMT_R, 0x33, 6, 0x01, ADD, A_RS1, B_RS2, 1, WB_ALU, 0,0,0,0,0, 1,1, false},
+  {"remu", FMT_R, 0x33, 7, 0x01, ADD, A_RS1, B_RS2, 1, WB_ALU, 0,0,0,0,0, 1,1, false},
+
   // fence is a no-op: valid, but touches nothing
   {"fence", FMT_I, 0x0F,  0, -1,   ADD,  A_RS1,  B_IMM, 0, WB_ALU, 0,0,0,0,0, 0,0, false},
 };
@@ -151,6 +161,7 @@ static void check_controls(const Entry& e, uint32_t inst) {
   expect("is_jalr",   inst, dut->is_jalr,   e.is_jalr);
   expect("uses_rs1",  inst, dut->uses_rs1,  e.uses_rs1);
   expect("uses_rs2",  inst, dut->uses_rs2,  e.uses_rs2);
+  expect("is_muldiv", inst, dut->is_muldiv, e.opcode == 0x33 && e.funct7 == 0x01);
   if (e.dp) {
     expect("alu_op", inst, dut->alu_op, e.alu_op);
     expect("a_sel",  inst, dut->a_sel,  e.a_sel);
@@ -211,6 +222,28 @@ static void test_directed() {
   drive(0x00008067);
   expect("is_jalr", 0x00008067, dut->is_jalr, 1);
   expect("wb_sel",  0x00008067, dut->wb_sel,  WB_PC4);
+
+  // M extension: funct7 = 0000001 selects mul/div/rem (encodings written from the R-type format)
+  cur_name = "mul x3,x1,x2";
+  drive(0x022081B3);
+  expect("is_muldiv",  0x022081B3, dut->is_muldiv,  1);
+  expect("illegal",    0x022081B3, dut->illegal,    0);
+  expect("reg_write",  0x022081B3, dut->reg_write,  1);
+  expect("funct3",     0x022081B3, dut->funct3,     0);
+  cur_name = "div x3,x1,x2";
+  drive(0x0220C1B3);
+  expect("is_muldiv",  0x0220C1B3, dut->is_muldiv,  1);
+  expect("funct3",     0x0220C1B3, dut->funct3,     4);
+  cur_name = "remu x3,x1,x2";
+  drive(0x0220F1B3);
+  expect("is_muldiv",  0x0220F1B3, dut->is_muldiv,  1);
+  expect("funct3",     0x0220F1B3, dut->funct3,     7);
+  cur_name = "add x3,x1,x2 (not a muldiv)";
+  drive(0x002081B3);
+  expect("is_muldiv",  0x002081B3, dut->is_muldiv,  0);
+  cur_name = "funct7 0000010 (still illegal)";
+  drive(0x042081B3);
+  expect("illegal",    0x042081B3, dut->illegal,    1);
 
   // Illegal / special words
   cur_name = "all zeros";  drive(0x00000000);
@@ -311,6 +344,7 @@ static void test_sweep(std::mt19937& rng) {
             expect("is_jalr",   inst, dut->is_jalr,   0);
             expect("uses_rs1",  inst, dut->uses_rs1,  0);
             expect("uses_rs2",  inst, dut->uses_rs2,  0);
+            expect("is_muldiv", inst, dut->is_muldiv, 0);
           }
         }
 }

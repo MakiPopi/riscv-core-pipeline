@@ -52,7 +52,7 @@ module core
   b_sel_e      b_sel;
   wb_sel_e     wb_sel;
   logic        reg_write, mem_read, mem_write;
-  logic        is_branch, is_jal, is_jalr, illegal;
+  logic        is_branch, is_jal, is_jalr, illegal, is_muldiv;
 
   // Only a pipelined core needs these (hazard detection), so nothing reads them here.
   /* verilator lint_off UNUSEDSIGNAL */
@@ -67,6 +67,7 @@ module core
     .mem_read(mem_read), .mem_write(mem_write),
     .is_branch(is_branch), .is_jal(is_jal), .is_jalr(is_jalr),
     .uses_rs1(uses_rs1), .uses_rs2(uses_rs2),
+    .is_muldiv(is_muldiv),
     .illegal(illegal)
   );
 
@@ -138,7 +139,7 @@ module core
 
   assign jump_misaligned = take_jump && (jump_target[1:0] != 2'b00);
   assign mem_misaligned  = (mem_read || mem_write) && lsu_misaligned;
-  assign trap            = !rst && (illegal || jump_misaligned || mem_misaligned);
+  assign trap            = !rst && (illegal || is_muldiv || jump_misaligned || mem_misaligned);  // is_muldiv: M extension not executed yet
   assign run             = !rst && !trap;      // this cycle completes an instruction
 
   assign rf_we = reg_write && run;

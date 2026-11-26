@@ -24,6 +24,7 @@ module decoder
   output logic        is_jalr,
   output logic        uses_rs1,
   output logic        uses_rs2,
+  output logic        is_muldiv,    // M extension (mul, div, rem): needs the multiply/divide unit
   output logic        illegal
 );
 
@@ -63,6 +64,7 @@ module decoder
     is_jalr   = 1'b0;
     uses_rs1  = 1'b0;
     uses_rs2  = 1'b0;
+    is_muldiv = 1'b0;
     illegal   = 1'b0;
 
     case (opcode)
@@ -158,9 +160,11 @@ module decoder
           3'b110: alu_op = ALU_OR;
           3'b111: alu_op = ALU_AND;
         endcase
-        // funct7 must be 0000000, except 0100000 which only SUB and SRA use
-        if (funct7 != 7'b0000000 &&
-            !(funct7 == 7'b0100000 && (funct3 == 3'b000 || funct3 == 3'b101)))
+        // funct7 must be 0000000, except 0100000 (only SUB and SRA) and 0000001 (the M extension: every funct3)
+        if (funct7 == 7'b0000001)
+          is_muldiv = 1'b1;
+        else if (funct7 != 7'b0000000 &&
+                 !(funct7 == 7'b0100000 && (funct3 == 3'b000 || funct3 == 3'b101)))
           illegal = 1'b1;
       end
 
@@ -181,6 +185,7 @@ module decoder
       is_jalr   = 1'b0;
       uses_rs1  = 1'b0;
       uses_rs2  = 1'b0;
+      is_muldiv = 1'b0;
     end
   end
 

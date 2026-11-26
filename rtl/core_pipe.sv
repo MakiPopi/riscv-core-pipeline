@@ -160,7 +160,7 @@ module core_pipe
   b_sel_e      d_b_sel;
   wb_sel_e     d_wb_sel;
   logic        d_reg_write, d_mem_read, d_mem_write;
-  logic        d_is_branch, d_is_jal, d_is_jalr, d_uses_rs1, d_uses_rs2, d_illegal;
+  logic        d_is_branch, d_is_jal, d_is_jalr, d_uses_rs1, d_uses_rs2, d_illegal, d_is_muldiv;
 
   decoder u_decoder (
     .inst(if_id.inst),
@@ -170,6 +170,7 @@ module core_pipe
     .mem_read(d_mem_read), .mem_write(d_mem_write),
     .is_branch(d_is_branch), .is_jal(d_is_jal), .is_jalr(d_is_jalr),
     .uses_rs1(d_uses_rs1), .uses_rs2(d_uses_rs2),
+    .is_muldiv(d_is_muldiv),
     .illegal(d_illegal)
   );
 
@@ -218,6 +219,7 @@ module core_pipe
       id_next.uses_rs1  = d_uses_rs1;
       id_next.uses_rs2  = d_uses_rs2;
       id_next.illegal   = d_illegal;
+      id_next.is_muldiv = d_is_muldiv;
     end
   end
 
@@ -317,7 +319,7 @@ module core_pipe
     ex_next = '0;
     if (id_ex.valid) begin
       ex_next.valid      = 1'b1;
-      ex_next.trap       = id_ex.illegal || jump_misaligned;
+      ex_next.trap       = id_ex.illegal || id_ex.is_muldiv || jump_misaligned;   // is_muldiv: M extension not executed yet
       ex_next.pc         = id_ex.pc;
       ex_next.inst       = id_ex.inst;
       ex_next.rd         = id_ex.rd;
