@@ -216,3 +216,21 @@ RAS_DEPTH ?= 3
 .PHONY: perf-table
 perf-table:
 > python3 scripts/perf_table.py
+
+# ---- Multiply/divide unit: unit test in three speeds (MUL_BITS,DIV_BITS) ----
+MULDIV_CFGS := 1,1 4,2 32,8
+
+.PHONY: muldiv
+muldiv:
+> @for cfg in $(MULDIV_CFGS); do \
+>   m=$$(echo $$cfg | cut -d, -f1); d=$$(echo $$cfg | cut -d, -f2); \
+>   dir=$(BUILD)/muldiv_$${m}_$${d}; mkdir -p $$dir; \
+>   echo "== muldiv mul_bits=$$m div_bits=$$d =="; \
+>   $(VERILATOR) $(VFLAGS) --top-module muldiv -GMUL_BITS=$$m -GDIV_BITS=$$d --Mdir $$dir -o muldiv_tb \
+>     -CFLAGS "-DMUL_BITS=$$m -DDIV_BITS=$$d" rtl/muldiv.sv tb/muldiv_tb.cpp > $$dir/build.log 2>&1 \
+>     || { cat $$dir/build.log; exit 1; }; \
+>   grep '%Warning' $$dir/build.log || true; \
+>   ./$$dir/muldiv_tb || exit 1; \
+> done
+
+test: muldiv
