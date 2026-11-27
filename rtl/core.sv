@@ -33,7 +33,8 @@ module core
 
   // Performance events: a single-cycle core never loses a cycle
   output logic        perf_stall,
-  output logic        perf_flush
+  output logic        perf_flush,
+  output logic        perf_mdstall
 );
 
   // ===================== Fetch =====================
@@ -96,6 +97,43 @@ module core
 
   alu u_alu (.a(alu_a), .b(alu_b), .op(alu_op), .result(alu_result));
 
+  // ---- M extension: combinational, written with the language's own operators. This is deliberately a
+  // different implementation from the iterative unit of the pipeline; Spike checks both. ----
+  logic [31:0] md_result;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic signed [63:0] p_ss, p_su;          // only the high words are used
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic        [63:0] p_uu;
+  logic [31:0] q_s, r_s, q_u, r_u, dvs, dvu;
+  logic        div_zero, div_ovf;
+
+  assign p_ss = $signed({{32{rs1_val[31]}}, rs1_val}) * $signed({{32{rs2_val[31]}}, rs2_val});
+  assign p_su = $signed({{32{rs1_val[31]}}, rs1_val}) * $signed({32'b0, rs2_val});
+  assign p_uu = {32'b0, rs1_val} * {32'b0, rs2_val};
+
+  assign div_zero = (rs2_val == 32'd0);
+  assign div_ovf  = (rs1_val == 32'h8000_0000) && (rs2_val == 32'hFFFF_FFFF);
+  // The division operators never see the two special cases (/0 and INT_MIN / -1); those are explicit below
+  assign dvs = (div_zero || div_ovf) ? 32'd1 : rs2_val;
+  assign dvu = div_zero ? 32'd1 : rs2_val;
+  assign q_s = $signed(rs1_val) / $signed(dvs);
+  assign r_s = $signed(rs1_val) % $signed(dvs);
+  assign q_u = rs1_val / dvu;
+  assign r_u = rs1_val % dvu;
+
+  always_comb begin
+    case (funct3)
+      3'b000:  md_result = p_uu[31:0];     // mul: the low word is the same for signed and unsigned operands
+      3'b001:  md_result = p_ss[63:32];    // mulh
+      3'b010:  md_result = p_su[63:32];    // mulhsu
+      3'b011:  md_result = p_uu[63:32];    // mulhu
+      3'b100:  md_result = div_zero ? 32'hFFFF_FFFF : div_ovf ? 32'h8000_0000 : q_s;   // div
+      3'b101:  md_result = div_zero ? 32'hFFFF_FFFF : q_u;                              // divu
+      3'b110:  md_result = div_zero ? rs1_val : div_ovf ? 32'd0 : r_s;                  // rem
+      default: md_result = div_zero ? rs1_val : r_u;                                    // remu
+    endcase
+  end
+
   // The branch condition is decided on the raw register values.
   logic cmp_taken;
   branch_cmp u_branch_cmp (.a(rs1_val), .b(rs2_val), .funct3(funct3), .taken(cmp_taken));
@@ -130,7 +168,7 @@ module core
     case (wb_sel)
       WB_MEM:  wb_data = load_data;
       WB_PC4:  wb_data = pc_plus4;
-      default: wb_data = alu_result;    // WB_ALU
+      default: wb_data = is_muldiv ? md_result : alu_result;    // WB_ALU (or the M extension)
     endcase
   end
 
@@ -139,7 +177,7 @@ module core
 
   assign jump_misaligned = take_jump && (jump_target[1:0] != 2'b00);
   assign mem_misaligned  = (mem_read || mem_write) && lsu_misaligned;
-  assign trap            = !rst && (illegal || is_muldiv || jump_misaligned || mem_misaligned);  // is_muldiv: M extension not executed yet
+  assign trap            = !rst && (illegal || jump_misaligned || mem_misaligned);
   assign run             = !rst && !trap;      // this cycle completes an instruction
 
   assign rf_we = reg_write && run;
@@ -162,5 +200,6 @@ module core
 
   assign perf_stall = 1'b0;
   assign perf_flush = 1'b0;
+  assign perf_mdstall = 1'b0;
 
 endmodule

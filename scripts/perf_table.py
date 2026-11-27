@@ -15,7 +15,7 @@ CONFIGS = [
     ("gshare + RAS", ["PRED=gshare", "RAS=1"]),
 ]
 ROW = re.compile(r"^(bench_\w+)\s+cycles=(\d+) instructions=(\d+) IPC=([\d.]+) \| load-use stalls=(\d+), "
-                 r"taken-branch/jump flushes=(\d+) \(2 cycles each\), other=(\d+)")
+                 r"taken-branch/jump flushes=(\d+) \(2 cycles each\), mul/div stalls=(\d+), other=(\d+)")
 
 
 def measure(args):
@@ -26,7 +26,7 @@ def measure(args):
     for line in r.stdout.splitlines():
         m = ROW.match(line)
         if m:
-            name, cycles, instr, _, stalls, flushes, other = m.groups()
+            name, cycles, instr, _, stalls, flushes, _md, other = m.groups()
             if int(other) != 4:
                 print(f"WARNING: other={other} (expected 4) for {name} with {' '.join(args)}", file=sys.stderr)
             rows[name] = (int(cycles), int(instr), int(stalls), int(flushes))

@@ -31,7 +31,7 @@ def run_core(name):
 def run_spike(name, count):
     # 0x80000000: program memory. 0x20000000: RAM for the exit store (Spike has a
     # built-in device at 0x10000000, so that address cannot be used).
-    cmd = ["spike", "--isa=rv32i", "-m0x80000000:0x10000,0x20000000:0x1000",
+    cmd = ["spike", "--isa=rv32im", "-m0x80000000:0x10000,0x20000000:0x1000",
            "--log-commits", f"{B}/prog/{name}.elf"]
     p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     watchdog = threading.Timer(20, p.kill)     # in case Spike hangs without output

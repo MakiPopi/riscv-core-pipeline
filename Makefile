@@ -40,14 +40,14 @@ CORE_RTL := rtl/alu_pkg.sv rtl/decode_pkg.sv rtl/alu.sv rtl/decoder.sv rtl/regfi
 lint:
 > $(VERILATOR) --lint-only -Wall --top-module core $(CORE_RTL)
 
-SOC_RTL := $(CORE_RTL) rtl/pipe_pkg.sv rtl/bpred.sv rtl/btb.sv rtl/ras.sv rtl/core_pipe.sv rtl/mem.sv rtl/soc_top.sv
+SOC_RTL := $(CORE_RTL) rtl/pipe_pkg.sv rtl/bpred.sv rtl/btb.sv rtl/ras.sv rtl/muldiv.sv rtl/core_pipe.sv rtl/mem.sv rtl/soc_top.sv
 SOC_BIN := $(BUILD)/soc_top/soc_top_tb
 
 .PHONY: soc run-first
 
 soc:
 > @mkdir -p $(BUILD)/soc_top
-> @$(VERILATOR) $(VFLAGS) --top-module soc_top -GPIPELINED=$(PIPELINED) -GBP_ENABLE=$(BP_ENABLE) -GBP_INDEX_BITS=$(BP_INDEX) -GBP_HIST_BITS=$(BP_HIST) -GBTB_INDEX_BITS=$(BTB_BITS) -GRAS_ENABLE=$(RAS) -GRAS_DEPTH_LOG2=$(RAS_DEPTH) --Mdir $(BUILD)/soc_top -o soc_top_tb \
+> @$(VERILATOR) $(VFLAGS) --top-module soc_top -GPIPELINED=$(PIPELINED) -GBP_ENABLE=$(BP_ENABLE) -GBP_INDEX_BITS=$(BP_INDEX) -GBP_HIST_BITS=$(BP_HIST) -GBTB_INDEX_BITS=$(BTB_BITS) -GRAS_ENABLE=$(RAS) -GRAS_DEPTH_LOG2=$(RAS_DEPTH) -GMUL_BITS=$(MUL_BITS) -GDIV_BITS=$(DIV_BITS) --Mdir $(BUILD)/soc_top -o soc_top_tb \
 >     $(SOC_RTL) tb/soc_top_tb.cpp > $(BUILD)/soc_top/build.log 2>&1 \
 >     || (cat $(BUILD)/soc_top/build.log; exit 1)
 > @grep '%Warning' $(BUILD)/soc_top/build.log || true
@@ -59,7 +59,7 @@ run-first: soc
 RVAS := riscv64-unknown-elf-as
 RVLD := riscv64-unknown-elf-ld
 RVOC := riscv64-unknown-elf-objcopy
-RVFLAGS := -march=rv32i -mabi=ilp32
+RVFLAGS := -march=rv32im -mabi=ilp32
 
 $(BUILD)/prog/%.elf: sw/%.S sw/link.ld sw/test_macros.inc
 > @mkdir -p $(BUILD)/prog
@@ -79,7 +79,7 @@ run: soc $(BUILD)/prog/$(PROG).mem
 .SECONDARY:
 
 # ---- Run every test program: make programs ----
-PROGRAMS := first_loop test_alu test_branch test_jump test_mem bench_sort bench_sieve bench_calls bench_collatz bench_ras_stress
+PROGRAMS := first_loop test_alu test_branch test_jump test_mem bench_sort bench_sieve bench_calls bench_collatz bench_ras_stress test_muldiv
 EXPECT_first_loop := 15
 
 .PHONY: programs
@@ -120,7 +120,7 @@ CORE ?= pipe
 PIPELINED := $(if $(filter pipe,$(CORE)),1,0)
 
 PIPE_RTL := rtl/alu_pkg.sv rtl/decode_pkg.sv rtl/pipe_pkg.sv rtl/alu.sv rtl/decoder.sv \
-            rtl/regfile.sv rtl/branch_cmp.sv rtl/lsu.sv rtl/bpred.sv rtl/btb.sv rtl/ras.sv rtl/core_pipe.sv
+            rtl/regfile.sv rtl/branch_cmp.sv rtl/lsu.sv rtl/bpred.sv rtl/btb.sv rtl/ras.sv rtl/muldiv.sv rtl/core_pipe.sv
 
 .PHONY: lint-pipe
 lint-pipe:
@@ -234,3 +234,7 @@ muldiv:
 > done
 
 test: muldiv
+
+# Speed of the multiply/divide unit (result bits per cycle, must divide 32): make perf MUL_BITS=32 DIV_BITS=8
+MUL_BITS ?= 4
+DIV_BITS ?= 2

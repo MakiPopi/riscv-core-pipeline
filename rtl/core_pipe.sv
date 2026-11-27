@@ -19,6 +19,8 @@ module core_pipe
   parameter int          BTB_INDEX_BITS = 6,    // log2 of the number of BTB entries
   parameter int          RAS_ENABLE     = 1,    // 1: predict returns and jalr targets (return-address stack)
   parameter int          RAS_DEPTH_LOG2 = 3,    // log2 of the number of return-stack entries
+  parameter int          MUL_BITS       = 4,    // multiplier bits per cycle (must divide 32)
+  parameter int          DIV_BITS       = 2,    // divider bits per cycle (must divide 32)
   localparam int         HW = (BP_HIST_BITS == 0) ? 1 : BP_HIST_BITS
 ) (
   input  logic        clk,
@@ -46,7 +48,8 @@ module core_pipe
 
   // Performance events, counted by the harness
   output logic        perf_stall,     // this cycle is a load-use stall
-  output logic        perf_flush      // a misprediction redirects the PC (2 cycles lost)
+  output logic        perf_flush,     // a misprediction redirects the PC (2 cycles lost)
+  output logic        perf_mdstall    // this cycle EX is held by a multiply/divide
 );
 
   // ---- Pipeline registers ----
@@ -66,6 +69,7 @@ module core_pipe
   logic          redirect;              // EX: the fetched path was wrong, restart from redirect_target
   logic [31:0]   redirect_target;
   logic          stall;                 // ID: load-use hazard, hold IF and ID for one cycle
+  logic          ex_hold;               // EX: a multiply/divide is still working, hold everything behind it
   logic          rf_we;                 // WB: register file write
   logic [31:0]   wb_data;
   logic          cmp_taken;             // EX: the branch condition holds
@@ -96,7 +100,7 @@ module core_pipe
   assign pred_taken   = (BP_ENABLE != 0) && btb_hit && (btb_uncond || bp_taken);
   assign pred_next_pc = pred_taken ? {pred_target, 2'b00} : pc + 32'd4;
   // This fetch moves into IF/ID (it is not held by a stall and not thrown away by a redirect)
-  assign fetch_accept = !rst && !redirect && !stall;
+  assign fetch_accept = !rst && !redirect && !stall && !ex_hold;
 
   btb #(.INDEX_BITS(BTB_INDEX_BITS)) u_btb (
     .clk(clk), .rst(rst),
@@ -134,7 +138,7 @@ module core_pipe
   always_ff @(posedge clk) begin
     if (rst)           pc <= RESET_PC;
     else if (redirect) pc <= redirect_target;
-    else if (!stall)   pc <= pred_next_pc;
+    else if (!stall && !ex_hold) pc <= pred_next_pc;
   end
 
   always_ff @(posedge clk) begin
@@ -143,7 +147,7 @@ module core_pipe
       ifid_pred_taken  <= 1'b0;
       ifid_pred_target <= '0;
       ifid_bp_hist     <= '0;
-    end else if (!stall) begin             // on a stall IF/ID keeps its value and the PC holds
+    end else if (!stall && !ex_hold) begin // on a stall or a hold IF/ID keeps its value and the PC holds
       if_id            <= '{valid: 1'b1, pc: pc, inst: imem_rdata};
       ifid_pred_taken  <= pred_taken;
       ifid_pred_target <= pred_target;
@@ -224,12 +228,12 @@ module core_pipe
   end
 
   always_ff @(posedge clk) begin
-    if (rst || redirect || stall) begin    // flush, or the bubble of a stall
+    if (rst || redirect || (stall && !ex_hold)) begin   // flush, or the bubble of a stall
       id_ex            <= '0;
       idex_pred_taken  <= 1'b0;
       idex_pred_target <= '0;
       idex_bp_hist     <= '0;
-    end else begin
+    end else if (!ex_hold) begin           // while EX is held, ID/EX keeps its value
       id_ex            <= id_next;
       idex_pred_taken  <= ifid_pred_taken;
       idex_pred_target <= ifid_pred_target;
@@ -280,6 +284,25 @@ module core_pipe
     .a(fwd_rs1), .b(fwd_rs2), .funct3(id_ex.funct3), .taken(cmp_taken)
   );
 
+  // ---- Multiply/divide (M extension): an iterative unit; EX is held until the result is ready ----
+  // The unit latches the operands when it accepts the operation, in the first cycle the instruction is in EX
+  // (forwarding is correct then). While it works, EX and everything behind it hold, and a bubble enters MEM.
+  // The result joins the normal path (ex_next.alu_result), so forwarding to later instructions is unchanged.
+  logic        md_done;
+  logic [31:0] md_result;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic        md_busy;
+  /* verilator lint_on UNUSEDSIGNAL */
+
+  muldiv #(.MUL_BITS(MUL_BITS), .DIV_BITS(DIV_BITS)) u_muldiv (
+    .clk(clk), .rst(rst),
+    .start(id_ex.valid && id_ex.is_muldiv),
+    .funct3(id_ex.funct3), .a(fwd_rs1), .b(fwd_rs2),
+    .busy(md_busy), .done(md_done), .result(md_result)
+  );
+
+  assign ex_hold = id_ex.valid && id_ex.is_muldiv && !md_done;
+
   // ---- The real outcome of the instruction in EX, and the check against the prediction ----
   logic        actual_taken, jump_misaligned;
   logic [31:0] actual_next_pc, predicted_next_pc;
@@ -319,12 +342,12 @@ module core_pipe
     ex_next = '0;
     if (id_ex.valid) begin
       ex_next.valid      = 1'b1;
-      ex_next.trap       = id_ex.illegal || id_ex.is_muldiv || jump_misaligned;   // is_muldiv: M extension not executed yet
+      ex_next.trap       = id_ex.illegal || jump_misaligned;
       ex_next.pc         = id_ex.pc;
       ex_next.inst       = id_ex.inst;
       ex_next.rd         = id_ex.rd;
       ex_next.funct3     = id_ex.funct3;
-      ex_next.alu_result = alu_result;
+      ex_next.alu_result = id_ex.is_muldiv ? md_result : alu_result;
       ex_next.store_data = fwd_rs2;
       ex_next.reg_write  = id_ex.reg_write;
       ex_next.wb_sel     = id_ex.wb_sel;
@@ -334,8 +357,8 @@ module core_pipe
   end
 
   always_ff @(posedge clk) begin
-    if (rst) ex_mem <= '0;
-    else     ex_mem <= ex_next;
+    if (rst || ex_hold) ex_mem <= '0;      // a held EX sends a bubble to MEM
+    else                ex_mem <= ex_next;
   end
 
   // ===================== MEM: data memory access =====================
@@ -406,5 +429,6 @@ module core_pipe
 
   assign perf_stall = stall;
   assign perf_flush = redirect;
+  assign perf_mdstall = ex_hold;
 
 endmodule
