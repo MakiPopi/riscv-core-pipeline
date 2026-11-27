@@ -217,3 +217,9 @@ test_muldiv at three unit speeds (mul/div stalls = 256 * (4*(32/m + 1) + 4*(32/d
 
 Its 2,304 load-use stalls are 256 * 9 (the lw feeding the first multiply, and the lw feeding each of the 8 compares).
 This program is only M operations, so its IPC is not typical; a realistic workload is the next step.
+
+Fuzzing with M instructions (`make fuzz FUZZ_M=m`; without it the old seeds still give the old programs, 90,843 instructions):
+seeds 1-200 (300 items) 90,805 instructions and seeds 1000-1499 (600 items) 411,536 instructions are identical to Spike;
+100 programs at each of the unit speeds 1/1 and 32/8 give 45,409 instructions each (the retired count cannot depend on the
+speed). Mutation: without the bubble that a held EX sends to MEM, 20 of 20 seeds fail, and the first mismatch is the first
+M instruction itself with result 0 (it retires before the unit has finished).

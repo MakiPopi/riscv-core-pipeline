@@ -79,7 +79,7 @@ run: soc $(BUILD)/prog/$(PROG).mem
 .SECONDARY:
 
 # ---- Run every test program: make programs ----
-PROGRAMS := first_loop test_alu test_branch test_jump test_mem bench_sort bench_sieve bench_calls bench_collatz bench_ras_stress test_muldiv
+PROGRAMS := first_loop test_alu test_branch test_jump test_mem bench_sort bench_sieve bench_calls bench_collatz bench_ras_stress test_muldiv bench_mix_m
 EXPECT_first_loop := 15
 
 .PHONY: programs
@@ -135,7 +135,7 @@ perf-%: soc $(BUILD)/prog/%.mem
 
 # ---- Compiled C programs: sw/<name>.c is linked with sw/crt0.S ----
 RVCC := riscv64-unknown-elf-gcc
-CFLAGS := -O2 -Wall -Wextra -march=rv32i -mabi=ilp32 -ffreestanding -fno-builtin \
+CFLAGS = -O2 -Wall -Wextra -march=$(ARCH) -mabi=ilp32 -ffreestanding -fno-builtin \
           -fno-tree-loop-distribute-patterns -mno-relax -msmall-data-limit=0
 
 $(BUILD)/prog/%.elf: sw/%.c sw/crt0.S sw/link.ld
@@ -241,3 +241,8 @@ DIV_BITS ?= 2
 
 # Random programs with M-extension instructions: make fuzz FUZZ_M=m   (FUZZ_M empty = the original programs)
 FUZZ_M ?=
+
+# C programs are built for rv32i, except those whose name ends in _m: they are built for rv32im, so the compiler
+# uses the multiply/divide instructions instead of calling library routines (which are not linked)
+ARCH ?= rv32i
+$(BUILD)/prog/%_m.elf: ARCH := rv32im
