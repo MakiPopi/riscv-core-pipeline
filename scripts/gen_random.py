@@ -26,11 +26,13 @@ SH_OPS = ["slli", "srli", "srai"]
 BR_OPS = ["beq", "bne", "blt", "bge", "bltu", "bgeu"]
 LOADS = {"lb": 1, "lbu": 1, "lh": 2, "lhu": 2, "lw": 4}
 STORES = {"sb": 1, "sh": 2, "sw": 4}
+MD_OPS = ["mul", "mulh", "mulhsu", "mulhu", "div", "divu", "rem", "remu"]
 
 
 class Gen:
-    def __init__(self, seed):
+    def __init__(self, seed, use_m=False):
         self.r = random.Random(seed)
+        self.use_m = use_m
         self.out = []
         self.recent = []      # most recently written registers
         self.nlabel = 0
@@ -71,8 +73,16 @@ class Gen:
 
     def simple(self):
         """One straight-line instruction (no control flow)."""
-        kind = self.r.choices(["r", "i", "shift", "lui", "auipc", "load", "store"],
-                              weights=[30, 22, 8, 4, 4, 16, 16])[0]
+        if self.use_m:
+            kinds = ["r", "i", "shift", "lui", "auipc", "load", "store", "md"]
+            weights = [26, 20, 8, 4, 4, 16, 16, 14]
+        else:                                    # unchanged, so the old seeds still give the same programs
+            kinds = ["r", "i", "shift", "lui", "auipc", "load", "store"]
+            weights = [30, 22, 8, 4, 4, 16, 16]
+        kind = self.r.choices(kinds, weights=weights)[0]
+        if kind == "md":                         # mul/div/rem on random registers: x0, 0, -1, INT_MIN all occur
+            a, b = self.src(), self.src()
+            return f"{self.r.choice(MD_OPS)} x{self.dest()}, x{a}, x{b}"
         if kind == "r":
             a, b = self.src(), self.src()
             return f"{self.r.choice(R_OPS)} x{self.dest()}, x{a}, x{b}"
@@ -159,8 +169,8 @@ class Gen:
         self.out.append(f"    .space {4 * 29}")
 
 
-def generate(seed, items=300):
-    g = Gen(seed)
+def generate(seed, items=300, use_m=False):
+    g = Gen(seed, use_m)
     g.program(seed, items)
     return "\n".join(g.out) + "\n"
 
@@ -168,4 +178,5 @@ def generate(seed, items=300):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit("usage: gen_random.py <seed> [items]")
-    sys.stdout.write(generate(int(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 300))
+    sys.stdout.write(generate(int(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 300,
+                              len(sys.argv) > 3 and sys.argv[3] == "m"))

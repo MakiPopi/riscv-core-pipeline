@@ -112,7 +112,7 @@ $(BUILD)/prog/fuzz_%.elf: $(BUILD)/fuzz/fuzz_%.S sw/link.ld
 
 .PHONY: fuzz
 fuzz:
-> python3 scripts/fuzz.py $(FUZZ_FIRST) $(FUZZ_COUNT) $(FUZZ_ITEMS)
+> python3 scripts/fuzz.py $(FUZZ_FIRST) $(FUZZ_COUNT) $(FUZZ_ITEMS) $(FUZZ_M)
 
 # ---- Which core the SoC simulation uses: make programs CORE=single  or  CORE=pipe ----
 # (Variables used inside recipes are expanded when the recipe runs, so defining them here is fine.)
@@ -131,7 +131,7 @@ lint-pipe:
 perf: $(PROGRAMS:%=perf-%)
 
 perf-%: soc $(BUILD)/prog/%.mem
-> @printf '%-16s' $*; ./$(SOC_BIN) +hex=$(BUILD)/prog/$*.mem +notrace | sed -n 's/^PERF: //p'
+> @printf '%-18s' $*; ./$(SOC_BIN) +hex=$(BUILD)/prog/$*.mem +notrace | sed -n 's/^PERF: //p'
 
 # ---- Compiled C programs: sw/<name>.c is linked with sw/crt0.S ----
 RVCC := riscv64-unknown-elf-gcc
@@ -238,3 +238,6 @@ test: muldiv
 # Speed of the multiply/divide unit (result bits per cycle, must divide 32): make perf MUL_BITS=32 DIV_BITS=8
 MUL_BITS ?= 4
 DIV_BITS ?= 2
+
+# Random programs with M-extension instructions: make fuzz FUZZ_M=m   (FUZZ_M empty = the original programs)
+FUZZ_M ?=
