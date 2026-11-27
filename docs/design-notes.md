@@ -189,3 +189,31 @@ f runs 510 times (computed in Python). Cosim: 13,538 instructions identical.
 - `bench_calls` gives identical results with the repair disabled (1,189 redirects either way): none of the four kernels
   exercises the repair, which is why this program exists. Correctness tests cannot see a wrong stack, because a wrong
   prediction only costs cycles; only the redirect counts can.
+
+## M extension (multiply/divide)
+The decoder takes funct7 = 0000001 on the OP opcode (`is_muldiv`). Pipeline: an iterative unit (`muldiv.sv`) that produces
+MUL_BITS (default 4) or DIV_BITS (default 2) result bits per cycle. An M instruction holds EX for `32/bits + 2` cycles, so
+`32/bits + 1` stall cycles (9 for mul and 17 for div at the defaults). PC, IF/ID and ID/EX hold, a bubble enters MEM, the
+operands are latched in the first EX cycle (when forwarding is correct), the result joins the normal result path (so
+forwarding is unchanged), and `fetch_accept` honours the hold (the predictor history and the return stack must not
+shift twice). The single-cycle core executes M combinationally with the language's own operators, a second independent
+implementation: the two agree through Spike. Assembly is built with -march=rv32im and Spike runs --isa=rv32im; the C
+benchmarks stay rv32i so their numbers remain comparable. Cycle accounting is now
+`cycles = instructions + load-use stalls + 2*flushes + mul/div stalls + 4`.
+
+Verification: unit test of the unit at three speeds (4,801,372 / 2,398,964 / 1,259,520 checks; the mulhsu-as-signed
+mutation fails 5,805 checks); decoder sweep (4,239,056 checks; mutation: mul decoded as illegal fails 80,165);
+`test_muldiv` (2,048 checks, every operation on 16 x 16 interesting values, expected values from a Python model whose
+identities were checked; cosim 7,431 instructions identical on both cores); mutation: IF/ID not held during a multiply
+makes the instruction behind the first mul vanish (cosim mismatch at instruction 9).
+
+test_muldiv at three unit speeds (mul/div stalls = 256 * (4*(32/m + 1) + 4*(32/d + 1)) exactly):
+
+| MUL_BITS / DIV_BITS | mul/div stalls | cycles | IPC |
+|---|---|---|---|
+| 1 / 1 | 67,584 | 77,363 | 0.096 |
+| 4 / 2 | 26,624 | 36,403 | 0.204 |
+| 32 / 8 | 7,168 | 16,947 | 0.438 |
+
+Its 2,304 load-use stalls are 256 * 9 (the lw feeding the first multiply, and the lw feeding each of the 8 compares).
+This program is only M operations, so its IPC is not typical; a realistic workload is the next step.
