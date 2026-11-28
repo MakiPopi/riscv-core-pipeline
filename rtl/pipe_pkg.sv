@@ -35,6 +35,7 @@ package pipe_pkg;
     logic        is_jalr;
     logic        uses_rs1;
     logic        uses_rs2;
+    logic        is_muldiv;
     logic        illegal;
   } id_ex_t;
 

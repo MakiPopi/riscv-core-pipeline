@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate random programs and compare each one with Spike.
 
-usage: fuzz.py <first_seed> <count> [items]
+usage: fuzz.py <first_seed> <count> [items] [m]
 """
 import os
 import re
@@ -21,9 +21,10 @@ def run(cmd):
 
 def main():
     if len(sys.argv) < 3:
-        sys.exit("usage: fuzz.py <first_seed> <count> [items]")
+        sys.exit("usage: fuzz.py <first_seed> <count> [items] [m]")
     first, count = int(sys.argv[1]), int(sys.argv[2])
     items = int(sys.argv[3]) if len(sys.argv) > 3 else 300
+    use_m = len(sys.argv) > 4 and sys.argv[4] == "m"      # add M-extension instructions
 
     r = run(["make", "-s", "soc"])                    # build the SoC simulation once
     if r.returncode != 0:
@@ -34,7 +35,7 @@ def main():
     for seed in range(first, first + count):
         name = f"fuzz_{seed}"
         with open(f"{B}/fuzz/{name}.S", "w") as f:
-            f.write(generate(seed, items))
+            f.write(generate(seed, items, use_m))
         r = run(["make", "-s", f"{B}/prog/{name}.mem"])
         if r.returncode != 0:
             failures.append((seed, "build failed:\n" + r.stdout + r.stderr))
@@ -58,7 +59,7 @@ def main():
     for seed, text in failures[:3]:
         print(f"\n--- seed {seed} ---")
         print(text.rstrip())
-        print(f"reproduce: python3 scripts/fuzz.py {seed} 1")
+        print(f"reproduce: python3 scripts/fuzz.py {seed} 1 {items}{' m' if use_m else ''}")
         print(f"source:    {B}/fuzz/fuzz_{seed}.S   (trace: make run PROG=fuzz_{seed})")
     sys.exit(1)
 

@@ -40,14 +40,14 @@ CORE_RTL := rtl/alu_pkg.sv rtl/decode_pkg.sv rtl/alu.sv rtl/decoder.sv rtl/regfi
 lint:
 > $(VERILATOR) --lint-only -Wall --top-module core $(CORE_RTL)
 
-SOC_RTL := $(CORE_RTL) rtl/pipe_pkg.sv rtl/bpred.sv rtl/btb.sv rtl/ras.sv rtl/core_pipe.sv rtl/mem.sv rtl/soc_top.sv
+SOC_RTL := $(CORE_RTL) rtl/pipe_pkg.sv rtl/bpred.sv rtl/btb.sv rtl/ras.sv rtl/muldiv.sv rtl/core_pipe.sv rtl/mem.sv rtl/soc_top.sv
 SOC_BIN := $(BUILD)/soc_top/soc_top_tb
 
 .PHONY: soc run-first
 
 soc:
 > @mkdir -p $(BUILD)/soc_top
-> @$(VERILATOR) $(VFLAGS) --top-module soc_top -GPIPELINED=$(PIPELINED) -GBP_ENABLE=$(BP_ENABLE) -GBP_INDEX_BITS=$(BP_INDEX) -GBP_HIST_BITS=$(BP_HIST) -GBTB_INDEX_BITS=$(BTB_BITS) -GRAS_ENABLE=$(RAS) -GRAS_DEPTH_LOG2=$(RAS_DEPTH) --Mdir $(BUILD)/soc_top -o soc_top_tb \
+> @$(VERILATOR) $(VFLAGS) --top-module soc_top -GPIPELINED=$(PIPELINED) -GBP_ENABLE=$(BP_ENABLE) -GBP_INDEX_BITS=$(BP_INDEX) -GBP_HIST_BITS=$(BP_HIST) -GBTB_INDEX_BITS=$(BTB_BITS) -GRAS_ENABLE=$(RAS) -GRAS_DEPTH_LOG2=$(RAS_DEPTH) -GMUL_BITS=$(MUL_BITS) -GDIV_BITS=$(DIV_BITS) --Mdir $(BUILD)/soc_top -o soc_top_tb \
 >     $(SOC_RTL) tb/soc_top_tb.cpp > $(BUILD)/soc_top/build.log 2>&1 \
 >     || (cat $(BUILD)/soc_top/build.log; exit 1)
 > @grep '%Warning' $(BUILD)/soc_top/build.log || true
@@ -59,7 +59,7 @@ run-first: soc
 RVAS := riscv64-unknown-elf-as
 RVLD := riscv64-unknown-elf-ld
 RVOC := riscv64-unknown-elf-objcopy
-RVFLAGS := -march=rv32i -mabi=ilp32
+RVFLAGS := -march=rv32im -mabi=ilp32
 
 $(BUILD)/prog/%.elf: sw/%.S sw/link.ld sw/test_macros.inc
 > @mkdir -p $(BUILD)/prog
@@ -79,7 +79,7 @@ run: soc $(BUILD)/prog/$(PROG).mem
 .SECONDARY:
 
 # ---- Run every test program: make programs ----
-PROGRAMS := first_loop test_alu test_branch test_jump test_mem bench_sort bench_sieve bench_calls bench_collatz bench_ras_stress
+PROGRAMS := first_loop test_alu test_branch test_jump test_mem bench_sort bench_sieve bench_calls bench_collatz bench_ras_stress test_muldiv bench_mix_m
 EXPECT_first_loop := 15
 
 .PHONY: programs
@@ -112,7 +112,7 @@ $(BUILD)/prog/fuzz_%.elf: $(BUILD)/fuzz/fuzz_%.S sw/link.ld
 
 .PHONY: fuzz
 fuzz:
-> python3 scripts/fuzz.py $(FUZZ_FIRST) $(FUZZ_COUNT) $(FUZZ_ITEMS)
+> python3 scripts/fuzz.py $(FUZZ_FIRST) $(FUZZ_COUNT) $(FUZZ_ITEMS) $(FUZZ_M)
 
 # ---- Which core the SoC simulation uses: make programs CORE=single  or  CORE=pipe ----
 # (Variables used inside recipes are expanded when the recipe runs, so defining them here is fine.)
@@ -120,7 +120,7 @@ CORE ?= pipe
 PIPELINED := $(if $(filter pipe,$(CORE)),1,0)
 
 PIPE_RTL := rtl/alu_pkg.sv rtl/decode_pkg.sv rtl/pipe_pkg.sv rtl/alu.sv rtl/decoder.sv \
-            rtl/regfile.sv rtl/branch_cmp.sv rtl/lsu.sv rtl/bpred.sv rtl/btb.sv rtl/ras.sv rtl/core_pipe.sv
+            rtl/regfile.sv rtl/branch_cmp.sv rtl/lsu.sv rtl/bpred.sv rtl/btb.sv rtl/ras.sv rtl/muldiv.sv rtl/core_pipe.sv
 
 .PHONY: lint-pipe
 lint-pipe:
@@ -131,11 +131,11 @@ lint-pipe:
 perf: $(PROGRAMS:%=perf-%)
 
 perf-%: soc $(BUILD)/prog/%.mem
-> @printf '%-16s' $*; ./$(SOC_BIN) +hex=$(BUILD)/prog/$*.mem +notrace | sed -n 's/^PERF: //p'
+> @printf '%-18s' $*; ./$(SOC_BIN) +hex=$(BUILD)/prog/$*.mem +notrace | sed -n 's/^PERF: //p'
 
 # ---- Compiled C programs: sw/<name>.c is linked with sw/crt0.S ----
 RVCC := riscv64-unknown-elf-gcc
-CFLAGS := -O2 -Wall -Wextra -march=rv32i -mabi=ilp32 -ffreestanding -fno-builtin \
+CFLAGS = -O2 -Wall -Wextra -march=$(ARCH) -mabi=ilp32 -ffreestanding -fno-builtin \
           -fno-tree-loop-distribute-patterns -mno-relax -msmall-data-limit=0
 
 $(BUILD)/prog/%.elf: sw/%.c sw/crt0.S sw/link.ld
@@ -216,3 +216,33 @@ RAS_DEPTH ?= 3
 .PHONY: perf-table
 perf-table:
 > python3 scripts/perf_table.py
+
+# ---- Multiply/divide unit: unit test in three speeds (MUL_BITS,DIV_BITS) ----
+MULDIV_CFGS := 1,1 4,2 32,8
+
+.PHONY: muldiv
+muldiv:
+> @for cfg in $(MULDIV_CFGS); do \
+>   m=$$(echo $$cfg | cut -d, -f1); d=$$(echo $$cfg | cut -d, -f2); \
+>   dir=$(BUILD)/muldiv_$${m}_$${d}; mkdir -p $$dir; \
+>   echo "== muldiv mul_bits=$$m div_bits=$$d =="; \
+>   $(VERILATOR) $(VFLAGS) --top-module muldiv -GMUL_BITS=$$m -GDIV_BITS=$$d --Mdir $$dir -o muldiv_tb \
+>     -CFLAGS "-DMUL_BITS=$$m -DDIV_BITS=$$d" rtl/muldiv.sv tb/muldiv_tb.cpp > $$dir/build.log 2>&1 \
+>     || { cat $$dir/build.log; exit 1; }; \
+>   grep '%Warning' $$dir/build.log || true; \
+>   ./$$dir/muldiv_tb || exit 1; \
+> done
+
+test: muldiv
+
+# Speed of the multiply/divide unit (result bits per cycle, must divide 32): make perf MUL_BITS=32 DIV_BITS=8
+MUL_BITS ?= 4
+DIV_BITS ?= 2
+
+# Random programs with M-extension instructions: make fuzz FUZZ_M=m   (FUZZ_M empty = the original programs)
+FUZZ_M ?=
+
+# C programs are built for rv32i, except those whose name ends in _m: they are built for rv32im, so the compiler
+# uses the multiply/divide instructions instead of calling library routines (which are not linked)
+ARCH ?= rv32i
+$(BUILD)/prog/%_m.elf: ARCH := rv32im

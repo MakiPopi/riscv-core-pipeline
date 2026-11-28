@@ -35,11 +35,11 @@ static int finish(int status) {
 
 // Cycle accounting. 'other' is what stalls and flushes do not explain: the pipeline fill
 // (4 cycles for the 5-stage pipeline, 0 for the single-cycle core).
-static void print_perf(long cycles, long retired, long stalls, long flushes) {
-  long other = cycles - retired - stalls - 2 * flushes;
+static void print_perf(long cycles, long retired, long stalls, long flushes, long mdstalls) {
+  long other = cycles - retired - stalls - 2 * flushes - mdstalls;
   printf("PERF: cycles=%ld instructions=%ld IPC=%.3f | load-use stalls=%ld, "
-         "taken-branch/jump flushes=%ld (2 cycles each), other=%ld\n",
-         cycles, retired, (double)retired / cycles, stalls, flushes, other);
+         "taken-branch/jump flushes=%ld (2 cycles each), mul/div stalls=%ld, other=%ld\n",
+         cycles, retired, (double)retired / cycles, stalls, flushes, mdstalls, other);
 }
 
 // One trace line per retired instruction:
@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
   dut->rst = 0;
   dut->eval();
 
-  long retired = 0, stalls = 0, flushes = 0;
+  long retired = 0, stalls = 0, flushes = 0, mdstalls = 0;
   for (long cycle = 0; cycle < max_cycles; cycle++) {
     // The outputs now describe the instruction at the current PC. Read them,
     // THEN clock, because the clock edge moves on to the next instruction.
@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
       if (dut->ret_mem_we && dut->ret_mem_addr == EXIT_ADDR) {
         uint32_t code = dut->ret_mem_data;
         printf("EXIT: code=%u (0x%x) after %ld instructions\n", code, code, retired);
-        print_perf(cycle + 1, retired, stalls, flushes);
+        print_perf(cycle + 1, retired, stalls, flushes, mdstalls);
         if (has_expect) {
           if ((long)code != expect) {
             printf("FAIL: expected %ld\n", expect);
@@ -105,6 +105,7 @@ int main(int argc, char** argv) {
     }
     if (dut->perf_stall) stalls++;
     if (dut->perf_flush) flushes++;
+    if (dut->perf_mdstall) mdstalls++;
     tick();
   }
 

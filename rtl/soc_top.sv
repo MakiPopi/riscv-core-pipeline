@@ -7,7 +7,9 @@ module soc_top #(
   parameter int BP_HIST_BITS   = 10,
   parameter int BTB_INDEX_BITS = 6,
   parameter int RAS_ENABLE     = 1,
-  parameter int RAS_DEPTH_LOG2 = 3
+  parameter int RAS_DEPTH_LOG2 = 3,
+  parameter int MUL_BITS       = 4,
+  parameter int DIV_BITS       = 2
   /* verilator lint_on UNUSEDPARAM */
 ) (
   input  logic        clk,
@@ -25,7 +27,8 @@ module soc_top #(
   output logic [31:0] ret_mem_data,
   output logic        trap,
   output logic        perf_stall,
-  output logic        perf_flush
+  output logic        perf_flush,
+  output logic        perf_mdstall
 );
 
   // Memory starts here, and so does the PC after reset (Spike's default layout)
@@ -39,7 +42,8 @@ module soc_top #(
     core_pipe #(
       .RESET_PC(BASE), .BP_ENABLE(BP_ENABLE), .BP_INDEX_BITS(BP_INDEX_BITS),
       .BP_HIST_BITS(BP_HIST_BITS), .BTB_INDEX_BITS(BTB_INDEX_BITS),
-      .RAS_ENABLE(RAS_ENABLE), .RAS_DEPTH_LOG2(RAS_DEPTH_LOG2)
+      .RAS_ENABLE(RAS_ENABLE), .RAS_DEPTH_LOG2(RAS_DEPTH_LOG2),
+      .MUL_BITS(MUL_BITS), .DIV_BITS(DIV_BITS)
     ) u_core (
       .clk(clk), .rst(rst),
       .imem_addr(imem_addr), .imem_rdata(imem_rdata),
@@ -50,7 +54,7 @@ module soc_top #(
       .ret_mem_re(ret_mem_re), .ret_mem_we(ret_mem_we),
       .ret_mem_addr(ret_mem_addr), .ret_mem_data(ret_mem_data),
       .trap(trap),
-      .perf_stall(perf_stall), .perf_flush(perf_flush)
+      .perf_stall(perf_stall), .perf_flush(perf_flush), .perf_mdstall(perf_mdstall)
     );
   end else begin : g_single
     core #(.RESET_PC(BASE)) u_core (
@@ -63,7 +67,7 @@ module soc_top #(
       .ret_mem_re(ret_mem_re), .ret_mem_we(ret_mem_we),
       .ret_mem_addr(ret_mem_addr), .ret_mem_data(ret_mem_data),
       .trap(trap),
-      .perf_stall(perf_stall), .perf_flush(perf_flush)
+      .perf_stall(perf_stall), .perf_flush(perf_flush), .perf_mdstall(perf_mdstall)
     );
   end
 
